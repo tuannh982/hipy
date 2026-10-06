@@ -1,0 +1,5 @@
+tag=v2026-07-30.1
+# The sysroot is published as a wasix-libc release asset. Verified by sha256.
+url=https://github.com/wasix-org/wasix-libc/releases/download/v2026-07-30.1/sysroot.tar.gz
+sha256=965a2ce5583e86fc4e3eddd02a5af75fd74796510c8aaa95ec69c56c57473c2d
+flattened=wasix-sysroot/sysroot/{include,lib,share} -> wasix-sysroot/

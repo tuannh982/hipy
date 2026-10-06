@@ -1,0 +1,778 @@
+diff --git a/amd/emu/gcn3/aluds.go b/amd/emu/gcn3/aluds.go
+index b8f5760..04c1a76 100644
+--- a/amd/emu/gcn3/aluds.go
++++ b/amd/emu/gcn3/aluds.go
+@@ -7,6 +7,8 @@ import (
+ )
+ 
+ func (u *ALU) runDS(state emu.InstEmuState) {
++	observeLDS(state) // bank-conflict telemetry; see ldsbank_observe.go
++
+ 	inst := state.Inst()
+ 	switch inst.Opcode {
+ 	case 13:
+diff --git a/amd/emu/gcn3/ldsbank_observe.go b/amd/emu/gcn3/ldsbank_observe.go
+new file mode 100644
+index 0000000..a4b116a
+--- /dev/null
++++ b/amd/emu/gcn3/ldsbank_observe.go
+@@ -0,0 +1,81 @@
++package gcn3
++
++import (
++	"fmt"
++
++	"github.com/sarchlab/mgpusim/v5/amd/emu"
++	"github.com/sarchlab/mgpusim/v5/amd/ldsbank"
++)
++
++// A side channel rather than a method on emu.InstEmuState, so hosts that do not
++// report bank conflicts need no change.
++type ldsBankSink interface {
++	SetLDSBankAccess(a *ldsbank.Access)
++}
++
++// observeLDS records the per-lane addresses of the DS instruction about to run.
++// A fresh Access per call: Pattern.Rep keeps the first Analysis it is handed, so
++// a shared one would let a recorded pattern's representative change under the host.
++func observeLDS(state emu.InstEmuState) {
++	sink, ok := state.(ldsBankSink)
++	if !ok {
++		return
++	}
++
++	inst := state.Inst()
++	info, ok := ldsbank.Lookup(uint8(inst.Opcode))
++	if !ok {
++		return
++	}
++
++	var a ldsbank.Access
++	// state.PC(), not inst.PC: nothing on the execution path writes inst.PC, so
++	// it is always 0 here and Record would collapse every ds_read_b32 into one row.
++	a.PC = state.PC()
++	a.Opcode = uint8(inst.Opcode)
++	a.Exec = state.EXEC()
++
++	for lane := 0; lane < ldsbank.WavefrontLanes; lane++ {
++		if a.Exec&(1<<uint(lane)) == 0 {
++			continue
++		}
++		addr0, addr1 := ldsbankAddrFor(
++			a.Opcode,
++			uint32(state.ReadOperand(inst.Addr, lane)),
++			inst.Offset0,
++			inst.Offset1,
++		)
++		a.Addr[lane][0] = addr0
++
++		// Left at 0 for single-address opcodes so the unused slot cannot be
++		// mistaken for a real address.
++		if info.NumAddrs == 2 {
++			a.Addr[lane][1] = addr1
++		}
++	}
++
++	sink.SetLDSBankAccess(&a)
++}
++
++// ldsbankAddrFor mirrors the address arithmetic of the matching handler in
++// aluds.go, including where the handlers deviate from the ISA (b128 offsets are
++// unscaled, read_b64 ignores them): the report must describe the addresses really
++// accessed. Every opcode in ldsbank's table is named, so a table entry added
++// there without a case here fails loudly instead of reporting a plausible address.
++func ldsbankAddrFor(opcode uint8, base, off0, off1 uint32) (uint32, uint32) {
++	switch opcode {
++	case 14, 55:
++		return base + off0*4, base + off1*4
++	case 78, 119:
++		return base + off0*8, base + off1*8
++	case 118:
++		return base, base
++	case 13, 30, 54, 223, 255:
++		return base + off0, base
++	default:
++		panic(fmt.Sprintf(
++			"ldsbank.Lookup accepts opcode %d but ldsbankAddrFor does not mirror its "+
++				"address arithmetic; add a case so the reported address matches aluds.go",
++			opcode))
++	}
++}
+diff --git a/amd/ldsbank/ldsbank.go b/amd/ldsbank/ldsbank.go
+new file mode 100644
+index 0000000..02d35e8
+--- /dev/null
++++ b/amd/ldsbank/ldsbank.go
+@@ -0,0 +1,414 @@
++// Package ldsbank computes GCN3 LDS bank conflicts from the per-lane addresses
++// a wavefront presents to a DS instruction.
++//
++// The GCN3 LDS is 32 banks of 4 bytes, a 128-byte row, so
++// bank(byteAddr) = (byteAddr / 4) mod 32. The hardware serves an access in
++// phases, and only lanes within one phase can collide. Within a phase, lanes
++// reaching one bank at one address are a broadcast; distinct addresses in one
++// bank must serialize. Degree is the largest number of distinct addresses any
++// single bank sees, maximized over phases; 1 is conflict-free.
++//
++// Three rules here are model choices, not hardware facts, and each is flagged on
++// Analysis so a host can label the rows that depend on it: sub-word conflict
++// granularity and the b8 phase width (AddressGranularityApproximate, set for
++// ds_write_b8), and the b128 read phase grouping, which AMD documents only for
++// MI-series (PhaseModelApproximate, set for ds_read_b128).
++//
++// accessTable covers exactly the opcodes gcn3.runDS dispatches, so it has no row
++// for ds_read_u8/ds_read_i8: gfx803 has no ds_read_b8 and such a kernel panics
++// upstream in runDS first.
++//
++// A leaf package on purpose: it imports nothing from MGPUSim and holds no
++// simulator state, so it can be exercised without a simulator at all.
++package ldsbank
++
++import "strconv"
++
++const (
++	// The bank geometry and the phase rule are AMD's, not this package's. ROCm's
++	// Composable Kernel documentation states that LDS is "organized into 32 or 64
++	// banks depending on the hardware architecture, each bank has a 4 bytes
++	// width", and gives the GCN mapping as bank = (address in bytes / 4) mod 32 --
++	// which is what conflictKey and bankOf implement. The same page states that a
++	// wavefront's access is divided into phases by instruction width, and works
++	// ds_write_b128 as 8 phases of 8 lanes over a 64-lane wave; 128 bytes per
++	// phase is the RowBytes/ByteSize rule LanesPerPhase applies. gfx803 is GCN, so
++	// it takes the 32-bank side of "32 or 64".
++	//
++	// rocm.docs.amd.com/projects/composable_kernel/en/develop/conceptual/
++	//   ck_tile/hardware/lds_bank_conflicts.html
++	//
++	// Note what that leaves unverified: the page also publishes the non-contiguous
++	// ds_read_b128 lane grouping PhaseLanes declines to implement, but it is
++	// written for MI-series, and PhaseModelApproximate is the flag that says so.
++	// phaseLaneCeiling is still ours, because the page says nothing about b8.
++	//
++	// NumBanks is the number of banks in a GCN3 LDS row.
++	NumBanks = 32
++
++	// BankBytes is the width of one bank.
++	BankBytes = 4
++
++	// RowBytes is the bank-aliasing period, and also the byte width of a phase.
++	// The phase width is derived from it.
++	RowBytes = NumBanks * BankBytes
++
++	// phaseLaneCeiling caps lanes per phase: a phase is at most one row wide, and
++	// a row is 32 banks, so it is at most 32 lanes however narrow the lanes are.
++	//
++	// INFERRED, NOT DOCUMENTED. Applied to b8 the published 128-bytes-per-phase
++	// rule asks for 128 lanes, which a wave64 does not have; 32 comes from the row
++	// geometry. It changes b8 only -- every published width already divides to 32
++	// or less.
++	phaseLaneCeiling = NumBanks
++
++	// WavefrontLanes is the lane count of a GCN3 wave64.
++	WavefrontLanes = 64
++
++	// MaxAddrsPerLane is the most distinct addresses one lane can touch in a
++	// single DS instruction (ds_read2_b64 and friends).
++	MaxAddrsPerLane = 2
++)
++
++// AccessInfo describes the memory footprint of one DS opcode.
++type AccessInfo struct {
++	// Name is the instruction mnemonic, e.g. "ds_read_b32".
++	Name string
++
++	// IsRead separates loads from stores.
++	//
++	// No consumer inside this package: analyzePhase dedupes by address for reads
++	// and writes alike. See Analysis.IsRead.
++	IsRead bool
++
++	// ByteSize is how many bytes move per address.
++	ByteSize int
++
++	// NumAddrs is how many addresses each lane touches.
++	NumAddrs int
++
++	// phaseModelApproximate: this opcode's phase grouping is a simplification
++	// rather than confirmed gfx803 behaviour.
++	phaseModelApproximate bool
++
++	// addressGranularityApproximate: this opcode is sub-word, so its degree rests
++	// on a model assumption. See Analysis.Degree.
++	addressGranularityApproximate bool
++}
++
++// LanesPerPhase reports how many lanes the hardware serves together:
++// RowBytes/ByteSize, capped at phaseLaneCeiling. ds_write_b8 therefore takes two
++// phases per wave64; every published width is already under the cap. A zero-width
++// footprint falls back to the one-lane floor rather than dividing by zero.
++func (i AccessInfo) LanesPerPhase() int {
++	if i.ByteSize < 1 || i.NumAddrs < 1 {
++		return 1
++	}
++	n := RowBytes / (i.ByteSize * i.NumAddrs)
++	if n < 1 {
++		return 1
++	}
++	if n > phaseLaneCeiling {
++		return phaseLaneCeiling
++	}
++	return n
++}
++
++// accessTable covers exactly the opcodes gcn3.runDS dispatches, and is the single
++// source of truth for every per-opcode fact, so nothing downstream re-derives a
++// property from a mnemonic string. Note which flag goes where: ds_read_b128 is
++// phaseModelApproximate alone (only its lane grouping is in question),
++// ds_write_b8 is addressGranularityApproximate alone.
++var accessTable = map[uint8]AccessInfo{
++	13:  {Name: "ds_write_b32", IsRead: false, ByteSize: 4, NumAddrs: 1},
++	14:  {Name: "ds_write2_b32", IsRead: false, ByteSize: 4, NumAddrs: 2},
++	30:  {Name: "ds_write_b8", IsRead: false, ByteSize: 1, NumAddrs: 1, addressGranularityApproximate: true},
++	54:  {Name: "ds_read_b32", IsRead: true, ByteSize: 4, NumAddrs: 1},
++	55:  {Name: "ds_read2_b32", IsRead: true, ByteSize: 4, NumAddrs: 2},
++	78:  {Name: "ds_write2_b64", IsRead: false, ByteSize: 8, NumAddrs: 2},
++	118: {Name: "ds_read_b64", IsRead: true, ByteSize: 8, NumAddrs: 1},
++	119: {Name: "ds_read2_b64", IsRead: true, ByteSize: 8, NumAddrs: 2},
++	223: {Name: "ds_write_b128", IsRead: false, ByteSize: 16, NumAddrs: 1},
++	255: {Name: "ds_read_b128", IsRead: true, ByteSize: 16, NumAddrs: 1, phaseModelApproximate: true},
++}
++
++// Lookup returns the footprint of a DS opcode, reporting false for anything that
++// is not one of the ten opcodes runDS handles.
++func Lookup(opcode uint8) (AccessInfo, bool) {
++	info, ok := accessTable[opcode]
++	return info, ok
++}
++
++// Access is one dynamic execution of a DS instruction as the emulator sees it.
++type Access struct {
++	// PC groups executions of the same static instruction.
++	PC uint64
++
++	// Opcode selects the footprint from the table above.
++	Opcode uint8
++
++	// Exec is the active-lane mask. Inactive lanes are ignored throughout.
++	Exec uint64
++
++	// Addr holds each lane's byte addresses, already offset-adjusted. Only the
++	// first NumAddrs entries are meaningful, NumAddrs coming from Lookup.
++	Addr [WavefrontLanes][MaxAddrsPerLane]uint32
++}
++
++// Phase is one hardware phase of an LDS access.
++type Phase struct {
++	// FirstLane and LastLane bound the phase's lane range, inclusive.
++	FirstLane int
++	LastLane  int
++
++	// Lanes lists the phase's active lanes, ascending.
++	Lanes []int
++
++	// Degree is the most distinct addresses any single bank sees here. A phase
++	// with no active lanes moved nothing and is trivially conflict-free, so it
++	// reports 1 rather than 0: see the convention note on Analysis.Degree.
++	Degree int
++
++	// BankAddrs counts DISTINCT addresses each bank saw, indexed by bank, so
++	// Degree is always max(BankAddrs) and the two cannot disagree.
++	//
++	// Deliberately not a lane count: lanes reaching one bank at one address are a
++	// broadcast, so a 64-lane read of a single address gives BankAddrs[0] == 1.
++	// Counting lanes would report the cheapest access in the ISA as a 64-way
++	// conflict. A full-width array rather than a sparse map, so a host can index
++	// any bank without building anything.
++	BankAddrs [NumBanks]int
++
++	// Stride is the byte difference between the first two active lanes' primary
++	// addresses, or 0 when the phase has fewer than two. The headline diagnostic,
++	// and the number an author can change: a stride of 128 puts every lane in one
++	// bank.
++	Stride int
++
++	// UniformStride reports whether every consecutive pair in Lanes shares
++	// Stride. A false here means the access is not a simple linear pattern and
++	// the bank map is the only way to read it.
++	UniformStride bool
++}
++
++// Analysis is the bank-conflict structure of one Access.
++type Analysis struct {
++	Opcode   uint8
++	Name     string
++	ByteSize int
++	PC       uint64
++
++	// IsRead says the access is a load rather than a store. No consumer here, and
++	// a host should not draw a race claim from it: the analyzer dedupes by address
++	// for reads and writes alike, so two lanes writing one address report degree 1
++	// exactly as two lanes reading one address do.
++	IsRead bool
++
++	// Degree is the worst phase Degree. 1 means conflict-free. Never below 1, so
++	// "== 1" and "not Conflicted" mean the same thing everywhere: every phase
++	// reports at least 1 and Analyze maximizes over them, so a fully masked
++	// wavefront reads as conflict-free rather than as a shape no other path
++	// produces. For a sub-word opcode it rests on a model assumption -- see
++	// AddressGranularityApproximate.
++	Degree int
++
++	// Conflicted is Degree > 1.
++	Conflicted bool
++
++	// PhaseModelApproximate marks a result whose phase grouping is a documented
++	// simplification rather than confirmed gfx803 behaviour. See PhaseLanes.
++	PhaseModelApproximate bool
++
++	// AddressGranularityApproximate marks a result whose Degree rests on an
++	// assumed address granularity. For a sub-word opcode conflictKey rounds a
++	// lane's address down to its dword, so 64 lanes writing bytes 0..63 -- the
++	// canonical conflict-free char-array store -- report degree 1.
++	//
++	// INFERRED, NOT DOCUMENTED. No primary source states sub-word conflict
++	// granularity. The dword rule follows from a bank being a two-port RAM serving
++	// one dword per cycle, and from the ISA guide's "in as little as two cycles"
++	// for a 64-lane access, which byte-keying would put out of reach by 4x.
++	//
++	// Only ds_write_b8 is flagged: it is the one table opcode that moves less
++	// than a dword. Resolving this needs a measurement on gfx803 hardware, not
++	// another reading of the prose.
++	AddressGranularityApproximate bool
++
++	Phases []Phase
++
++	// LaneBank is the bank each active lane's primary address maps to, and -1
++	// for an inactive lane.
++	LaneBank [WavefrontLanes]int
++}
++
++// PhaseLanes returns the lanes the hardware serves together in one phase: a
++// contiguous group covering one 128-byte row.
++//
++// Known deviation: CK-Tile documents a non-contiguous grouping for ds_read_b128
++// chosen so the result feeds MFMA vertically. It is written for MI-series and is
++// not confirmed for gfx803, so this returns contiguous groups and the caller flags
++// those results with PhaseModelApproximate.
++func PhaseLanes(first, lanesPerPhase int) []int {
++	lanes := make([]int, 0, lanesPerPhase)
++	for i := first; i < first+lanesPerPhase && i < WavefrontLanes; i++ {
++		lanes = append(lanes, i)
++	}
++	return lanes
++}
++
++// Analyze computes the bank-conflict structure of one DS access, reporting
++// false for an opcode outside the DS set so callers can skip cheaply.
++func Analyze(a Access) (Analysis, bool) {
++	info, ok := Lookup(a.Opcode)
++	if !ok {
++		return Analysis{}, false
++	}
++
++	out := Analysis{
++		Opcode:                        a.Opcode,
++		Name:                          info.Name,
++		IsRead:                        info.IsRead,
++		ByteSize:                      info.ByteSize,
++		PC:                            a.PC,
++		PhaseModelApproximate:         info.phaseModelApproximate,
++		AddressGranularityApproximate: info.addressGranularityApproximate,
++	}
++	for i := range out.LaneBank {
++		out.LaneBank[i] = -1
++	}
++
++	lanesPerPhase := info.LanesPerPhase()
++	for first := 0; first < WavefrontLanes; first += lanesPerPhase {
++		ph := analyzePhase(&a, info, &out.LaneBank, first, lanesPerPhase)
++		out.Phases = append(out.Phases, ph)
++		if ph.Degree > out.Degree {
++			out.Degree = ph.Degree
++		}
++	}
++
++	out.Conflicted = out.Degree > 1
++	return out, true
++}
++
++// StrideOfFirstPhase is the byte step between consecutive lanes in the first
++// phase, which is the number that decides how many lanes share a bank. It is 0
++// when the first phase has fewer than two active lanes.
++func (a Analysis) StrideOfFirstPhase() int {
++	if len(a.Phases) == 0 {
++		return 0
++	}
++	return a.Phases[0].Stride
++}
++
++// analyzePhase computes one hardware phase: the bank each active lane lands in,
++// the distinct addresses each bank sees, and the most any single bank sees.
++//
++// laneBank is updated in place; the caller seeds every entry to -1. a is a
++// pointer because Analyze runs this up to eight times for a b128 wave and a value
++// would copy the address matrix each time. Nothing here mutates it.
++func analyzePhase(
++	a *Access,
++	info AccessInfo,
++	laneBank *[WavefrontLanes]int,
++	first, lanesPerPhase int,
++) Phase {
++	ph := Phase{FirstLane: first, LastLane: first + lanesPerPhase - 1, Degree: 1}
++	if ph.LastLane > WavefrontLanes-1 {
++		ph.LastLane = WavefrontLanes - 1
++	}
++
++	// Round up: a sub-word access still occupies the bank it starts in, so b8
++	// spans 1 bank, not 0. Truncating here once reported every b8 access as
++	// conflict-free.
++	banksPerAddr := (info.ByteSize + BankBytes - 1) / BankBytes
++
++	// A wide lane contributes its key to each bank it spans, so a b128 lane at
++	// address 0 lands in banks 0 through 3.
++	var addrs [NumBanks][]uint32
++
++	for _, lane := range PhaseLanes(first, lanesPerPhase) {
++		if a.Exec&(1<<uint(lane)) == 0 {
++			continue
++		}
++		ph.Lanes = append(ph.Lanes, lane)
++		laneBank[lane] = int(a.Addr[lane][0]/BankBytes) % NumBanks
++
++		for n := 0; n < info.NumAddrs; n++ {
++			cur := a.Addr[lane][n]
++			key := conflictKey(info, cur)
++			base := int(cur/BankBytes) % NumBanks
++			for k := 0; k < banksPerAddr; k++ {
++				bank := (base + k) % NumBanks
++				if !containsAddr(addrs[bank], key) {
++					addrs[bank] = append(addrs[bank], key)
++				}
++			}
++		}
++	}
++
++	for b := 0; b < NumBanks; b++ {
++		// One pass, two outputs, so Degree is always max(BankAddrs).
++		ph.BankAddrs[b] = len(addrs[b])
++		if len(addrs[b]) > ph.Degree {
++			ph.Degree = len(addrs[b])
++		}
++	}
++	ph.Stride, ph.UniformStride = phaseStride(ph.Lanes, &a.Addr)
++
++	return ph
++}
++
++// conflictKey returns the value a lane's address is deduplicated by within one
++// bank: two lanes collide only if their keys differ.
++//
++// At dword width and above this is the identity, because a lane's bytes already
++// lie inside one dword. Below a dword it rounds down to the containing dword,
++// because a bank is a 4-byte word and services one word per cycle: lanes writing
++// bytes 0,1,2,3 of a dword write that one word, which is one cycle, not four.
++//
++// INFERRED, NOT DOCUMENTED; see Analysis.AddressGranularityApproximate.
++func conflictKey(info AccessInfo, cur uint32) uint32 {
++	if info.ByteSize < BankBytes {
++		return cur / BankBytes * BankBytes
++	}
++	return cur
++}
++
++// phaseStride reports the byte difference between consecutive active lanes'
++// primary addresses, and whether it is the same every time.
++func phaseStride(lanes []int, addr *[WavefrontLanes][MaxAddrsPerLane]uint32) (int, bool) {
++	if len(lanes) < 2 {
++		return 0, true
++	}
++	stride := int(addr[lanes[1]][0]) - int(addr[lanes[0]][0])
++	for i := 2; i < len(lanes); i++ {
++		if int(addr[lanes[i]][0])-int(addr[lanes[i-1]][0]) != stride {
++			return stride, false
++		}
++	}
++	return stride, true
++}
++
++func containsAddr(list []uint32, v uint32) bool {
++	for _, got := range list {
++		if got == v {
++			return true
++		}
++	}
++	return false
++}
++
++// key renders the phase degrees as one comparable string. A weak identity by
++// design: "1,1" matches every access whose phases are both conflict-free,
++// however their lanes are arranged. The recorder folds same-degree patterns into
++// one row because that is the level at which an author reads a conflict summary.
++func (a Analysis) key() string {
++	d := make([]byte, 0, len(a.Phases)*3)
++	for i, p := range a.Phases {
++		if i > 0 {
++			d = append(d, ',')
++		}
++		d = strconv.AppendInt(d, int64(p.Degree), 10)
++	}
++	return string(d)
++}
+diff --git a/amd/ldsbank/recorder.go b/amd/ldsbank/recorder.go
+new file mode 100644
+index 0000000..bf8f152
+--- /dev/null
++++ b/amd/ldsbank/recorder.go
+@@ -0,0 +1,181 @@
++package ldsbank
++
++import "sync"
++
++const (
++	// DefaultMaxPatterns bounds the distinct pattern keys one run keeps, so a
++	// pathological kernel cannot grow the map without limit.
++	DefaultMaxPatterns = 256
++
++	// DefaultMaxInstances bounds the per-pattern instance list that links a
++	// pattern back to the wavefront trace. Counts stay exact; only the list is
++	// clipped, and it reports that it was.
++	DefaultMaxInstances = 64
++)
++
++// PatternKey identifies one group of executions as it appears in the report: the
++// static instruction, its opcode, and its per-phase degrees. The degree vector is
++// deliberately coarse, so two executions in one key can still differ in which
++// lanes were active. See Pattern.Rep.
++type PatternKey struct {
++	PC      uint64
++	Opcode  uint8
++	Degrees string
++}
++
++// Instance identifies one dynamic execution of a pattern. InstTaskID is the
++// tracing task the instruction runs under, which is how the host joins a pattern
++// back to the wavefront it happened on.
++type Instance struct {
++	InstTaskID uint64
++}
++
++// Pattern is one group of executions that agree on a PatternKey, plus how often
++// the group ran. The group is a reporting unit, not a claim that the members
++// accessed memory identically; read Rep below before drawing anything from it.
++type Pattern struct {
++	Key PatternKey
++
++	// Rep is the Analysis of the first execution that opened this pattern, kept
++	// so the report can draw the bank map without re-deriving it. Later
++	// executions never overwrite it.
++	//
++	// It is one member of the group, not a summary: a bank map drawn from Rep is
++	// that execution's map, not a union or an average. Phases and LaneBank come
++	// from the same execution, so they are consistent with each other.
++	Rep Analysis
++
++	// Count is the exact number of executions, even when Instances is clipped.
++	Count uint64
++
++	Instances []Instance
++
++	// InstancesTruncated reports that Instances is shorter than Count.
++	InstancesTruncated bool
++}
++
++// Stats summarizes what a drain had to leave behind.
++type Stats struct {
++	// Patterns is how many distinct keys were recorded.
++	Patterns uint64
++
++	// DroppedExecutions counts Record calls past the pattern cap: executions, not
++	// distinct patterns.
++	DroppedExecutions uint64
++
++	// TruncatedInstances counts instance-list entries that did not fit.
++	TruncatedInstances uint64
++}
++
++// Recorder aggregates analyses into bounded patterns: a kernel can execute
++// millions of DS instructions, so keying on the pattern collapses them at capture.
++type Recorder struct {
++	mu          sync.Mutex
++	patterns    map[PatternKey]*Pattern
++	order       []PatternKey
++	maxPatterns int
++	dropped     uint64
++	truncated   uint64
++}
++
++// NewRecorder returns a Recorder keeping at most maxPatterns distinct patterns.
++// A non-positive maxPatterns is treated as DefaultMaxPatterns.
++func NewRecorder(maxPatterns int) *Recorder {
++	if maxPatterns <= 0 {
++		maxPatterns = DefaultMaxPatterns
++	}
++	return &Recorder{
++		patterns:    map[PatternKey]*Pattern{},
++		maxPatterns: maxPatterns,
++	}
++}
++
++// Record folds one execution into its pattern.
++func (r *Recorder) Record(a Analysis, instTaskID uint64) {
++	key := PatternKey{PC: a.PC, Opcode: a.Opcode, Degrees: a.key()}
++
++	r.mu.Lock()
++	defer r.mu.Unlock()
++
++	existing, ok := r.patterns[key]
++	if !ok {
++		if len(r.patterns) >= r.maxPatterns {
++			r.dropped++
++			return
++		}
++		existing = &Pattern{Key: key, Rep: a}
++		r.patterns[key] = existing
++		r.order = append(r.order, key)
++	}
++
++	existing.Count++
++	if len(existing.Instances) < DefaultMaxInstances {
++		existing.Instances = append(existing.Instances, Instance{InstTaskID: instTaskID})
++		return
++	}
++	existing.InstancesTruncated = true
++	r.truncated++
++}
++
++// Drain returns the patterns in first-seen order and empties the recorder. The
++// returned slice is detached and safe to retain.
++func (r *Recorder) Drain() ([]Pattern, Stats) {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++
++	pats := make([]Pattern, 0, len(r.order))
++	for _, key := range r.order {
++		pats = append(pats, *r.patterns[key])
++	}
++	stats := Stats{
++		Patterns:           uint64(len(pats)),
++		DroppedExecutions:  r.dropped,
++		TruncatedInstances: r.truncated,
++	}
++
++	r.patterns = map[PatternKey]*Pattern{}
++	r.order = nil
++	r.dropped = 0
++	r.truncated = 0
++
++	return pats, stats
++}
++
++// Snapshot returns the patterns WITHOUT emptying the recorder, for a host that
++// wants to read the analysis mid-run: draining then would freeze a partial
++// analysis and leave the final report missing everything after that point. Cheap
++// because the pattern map is bounded.
++func (r *Recorder) Snapshot() ([]Pattern, Stats) {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++
++	pats := make([]Pattern, 0, len(r.order))
++	for _, key := range r.order {
++		pats = append(pats, *r.patterns[key])
++	}
++	return pats, Stats{
++		Patterns:           uint64(len(pats)),
++		DroppedExecutions:  r.dropped,
++		TruncatedInstances: r.truncated,
++	}
++}
++
++// defaultRecorder backs the package-level functions, so the emulator and the
++// timing unit need no handle threaded through the compute-unit builder.
++var defaultRecorder = NewRecorder(DefaultMaxPatterns)
++
++// Record folds one execution into the package-level recorder. Called in every
++// simulation that runs a DS instruction, whether or not a host ever drains.
++//
++// An undrained recorder is bounded, not leaky: past DefaultMaxPatterns it only
++// increments DroppedExecutions. The drop is silent but affects nothing else --
++// this package writes to its own map and to nothing else, so simulated time is
++// the same whether a host drains or not.
++func Record(a Analysis, instTaskID uint64) { defaultRecorder.Record(a, instTaskID) }
++
++// Drain empties and returns the package-level recorder. Until one exists the
++// recorded patterns are unreachable. See Record for what an undrained one costs.
++func Drain() ([]Pattern, Stats) { return defaultRecorder.Drain() }
++
++// Snapshot is the non-destructive counterpart of Drain.
++func Snapshot() ([]Pattern, Stats) { return defaultRecorder.Snapshot() }
+diff --git a/amd/timing/cu/ldsunit.go b/amd/timing/cu/ldsunit.go
+index 4da340f..43c5492 100644
+--- a/amd/timing/cu/ldsunit.go
++++ b/amd/timing/cu/ldsunit.go
+@@ -2,6 +2,7 @@ package cu
+ 
+ import (
+ 	"github.com/sarchlab/mgpusim/v5/amd/emu"
++	"github.com/sarchlab/mgpusim/v5/amd/ldsbank"
+ 	"github.com/sarchlab/mgpusim/v5/amd/timing/wavefront"
+ )
+ 
+@@ -81,6 +82,17 @@ func (u *LDSUnit) runExecStage() bool {
+ 	if u.cycleLeft == 0 {
+ 		u.alu.SetLDS(u.toExec.WG.LDS)
+ 		u.alu.Run(u.toExec)
++
++		// Record the bank structure of what the emulator just ran. The 14-cycle
++		// charge below is left reading the degree off nothing: a conflict
++		// re-plans an access rather than moving more data, and this model cannot
++		// say how many replays a real gfx803 would take. The degree is reported.
++		if a := u.toExec.LDSBankAccess(); a != nil {
++			if an, ok := ldsbank.Analyze(*a); ok {
++				ldsbank.Record(an, u.toExec.DynamicInst().ID)
++			}
++		}
++
+ 		u.cycleLeft = 14
+ 		return true
+ 	}
+diff --git a/amd/timing/wavefront/wavefront.go b/amd/timing/wavefront/wavefront.go
+index 1e55dda..c51338f 100644
+--- a/amd/timing/wavefront/wavefront.go
++++ b/amd/timing/wavefront/wavefront.go
+@@ -9,6 +9,7 @@ import (
+ 	"github.com/sarchlab/akita/v5/timing"
+ 	"github.com/sarchlab/mgpusim/v5/amd/insts"
+ 	"github.com/sarchlab/mgpusim/v5/amd/kernels"
++	"github.com/sarchlab/mgpusim/v5/amd/ldsbank"
+ )
+ 
+ // RegFileAccessor provides access to register files for a wavefront.
+@@ -76,6 +77,11 @@ type Wavefront struct {
+ 	// When register scoreboard is enabled, this contains a *cu.Scoreboard
+ 	// (stored as interface{} to avoid circular imports).
+ 	ScoreboardData interface{}
++
++	// ldsBankAccess holds the per-lane LDS addresses of the DS instruction
++	// executing, stashed by the emulator and drained by the LDS unit. Nothing
++	// scheduling-relevant reads it, and the LDS charge does not depend on it.
++	ldsBankAccess *ldsbank.Access
+ }
+ 
+ // NewWavefront creates a new Wavefront of the timing package, wrapping the
+@@ -250,3 +256,16 @@ func (wf *Wavefront) WriteOperandBytes(operand *insts.Operand, laneID int, data
+ 
+ 	wf.RegAccessor.WriteReg(operand.Register, operand.RegCount, laneID, waveOffset, data)
+ }
++
++// SetLDSBankAccess stashes the per-lane addresses of the LDS instruction now
++// executing. The Analysis is computed later, by the LDS unit.
++func (wf *Wavefront) SetLDSBankAccess(a *ldsbank.Access) { wf.ldsBankAccess = a }
++
++// LDSBankAccess returns the stashed Access and clears it. Draining rather than
++// peeking keeps the stash a one-slot mailbox: a wavefront runs one instruction at
++// a time, so a second DS cannot overwrite an Access the host has not collected.
++func (wf *Wavefront) LDSBankAccess() *ldsbank.Access {
++	a := wf.ldsBankAccess
++	wf.ldsBankAccess = nil
++	return a
++}

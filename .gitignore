@@ -1,0 +1,12 @@
+.superpowers/
+simulator/third_party/*
+!simulator/third_party/akita_patches/
+!simulator/third_party/mgpusim_patches/
+*.sqlite3
+toolchain/artifacts/
+toolchain/runner/node_modules/
+website/node_modules/
+website/public/toolchain/
+website/public/sim-runner.wasm
+website/dist/
+toolchain/build/

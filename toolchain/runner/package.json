@@ -1,0 +1,9 @@
+{
+  "name": "hipy-toolchain-runner",
+  "private": true,
+  "type": "commonjs",
+  "description": "Pinned Node host (@wasmer/sdk) that runs the WASIX LLVM driver for the compile pipeline and the tests",
+  "dependencies": {
+    "@wasmer/sdk": "0.16.0"
+  }
+}

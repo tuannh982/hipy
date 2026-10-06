@@ -1,0 +1,251 @@
+diff --git a/amd/emu/cdna3/opcode_test.go b/amd/emu/cdna3/opcode_test.go
+index df683d2..5c18226 100644
+--- a/amd/emu/cdna3/opcode_test.go
++++ b/amd/emu/cdna3/opcode_test.go
+@@ -184,28 +184,75 @@ func TestSOP2Opcode38SBFEI32(t *testing.T) {
+ 	}
+ }
+ 
+-func TestVOP1Opcode56VMOVRELSDB32(t *testing.T) {
++// s_movk_i32 sign-extends its 16-bit immediate across all 32 bits of the
++// destination. Widening the sign-extended int16 through its uint16 bits instead
++// stored 0x0000ffe4 for a -28 immediate, which reads as a corrupted address
++// anywhere downstream: clang pairs `s_movk_i32 sN, -28` with v_mad_i32_i24
++// against a work-item id, so the result came out low by exactly lane<<16.
++func TestSOPKOpcode0SMOVKI32SignExtendsTheImmediate(t *testing.T) {
++	alu := NewALU(nil)
++
++	cases := []struct {
++		imm  uint16
++		want uint32
++	}{
++		{0xFFE4, 0xFFFFFFE4}, // -28
++		{0xFFFF, 0xFFFFFFFF}, // -1
++		{0x001C, 0x0000001C}, // 28
++		{0x0000, 0x00000000},
++	}
++
++	for _, c := range cases {
++		state := newMockInstState()
++		state.inst.FormatType = insts.SOPK
++		state.inst.Opcode = 0
++		state.inst.SImm16 = &insts.Operand{}
++		state.inst.Dst = &insts.Operand{}
++		state.setOperand(state.inst.SImm16, 0, uint64(c.imm))
++
++		alu.Run(state)
++
++		if got := uint32(state.operands[state.inst.Dst][0]); got != c.want {
++			t.Errorf("s_movk_i32 %#04x: expected %#08x, got %#08x", c.imm, c.want, got)
++		}
++	}
++}
++
++// VOP1 opcode 56 on CDNA3 is v_mov_b64: a 64-bit register move, both words of the
++// destination pair written for every active lane.
++//
++// What this test cannot do is distinguish this handler from the v_movrelsd_b32 one
++// it replaced. Both bodies are the same lane-wise copy, so the mis-decode that
++// motivated the change -- the word arriving as the neighbouring DS-relative store --
++// is invisible from here: the operands are set up by hand, so the widths the decode
++// table supplies never enter. What a unit test CAN see is the exec mask, which the
++// previous version of this test did not exercise at all, and which is what decides
++// whether an inactive lane's high word is left stale. The test that fails if the
++// decode-table entry is reverted is TestVOP1Opcode56DecodesAsVMOVB64 in
++// amd/insts/decodetable_test.go; the fixture that fails if the emulator's copy is
++// wrong is website/tests/fixtures/cdna3-mov-b64.cu.
++func TestVOP1Opcode56VMOVB64(t *testing.T) {
+ 	alu := NewALU(nil)
+ 	state := newMockInstState()
+ 	state.inst.FormatType = insts.VOP1
+ 	state.inst.Opcode = 56
+ 	state.exec = 0xF
+ 
+-	state.setOperand(state.inst.Src0, 0, 11)
+-	state.setOperand(state.inst.Src0, 1, 22)
+-	state.setOperand(state.inst.Src0, 2, 33)
+-	state.setOperand(state.inst.Src0, 3, 44)
++	for lane := 0; lane < 4; lane++ {
++		state.setOperand(state.inst.Src0, lane, uint64(11+11*lane))
++	}
+ 
+ 	alu.Run(state)
+ 
+-	if state.operands[state.inst.Dst][0] != 11 ||
+-		state.operands[state.inst.Dst][1] != 22 ||
+-		state.operands[state.inst.Dst][2] != 33 ||
+-		state.operands[state.inst.Dst][3] != 44 {
+-		t.Fatalf("unexpected movrelsd result: [%d %d %d %d]",
+-			state.operands[state.inst.Dst][0],
+-			state.operands[state.inst.Dst][1],
+-			state.operands[state.inst.Dst][2],
+-			state.operands[state.inst.Dst][3])
++	for lane := 0; lane < 4; lane++ {
++		want := uint64(11 + 11*lane)
++		if got := state.operands[state.inst.Dst][lane]; got != want {
++			t.Errorf("active lane %d: expected %d, got %d", lane, want, got)
++		}
++	}
++	for lane := 4; lane < 64; lane++ {
++		if _, written := state.operands[state.inst.Dst][lane]; written {
++			t.Errorf("inactive lane %d was written; an exec-masked move must leave it alone", lane)
++		}
+ 	}
+ }
+diff --git a/amd/emu/cdna3/sopk.go b/amd/emu/cdna3/sopk.go
+index 09e2c52..6a7f34b 100644
+--- a/amd/emu/cdna3/sopk.go
++++ b/amd/emu/cdna3/sopk.go
+@@ -46,17 +46,28 @@ func (u *ALU) runSOPK(state emu.InstEmuState) {
+ 	}
+ }
+ 
++// runSMOVKI32 implements s_movk_i32: Dst = signext(SImm16) over all 32 bits.
++//
++// imm is already a sign-extended int16, so it has to reach WriteOperand as an
++// int16 and be widened there: converting it to its uint16 bits first (via
++// emu.Int16ToBits) throws the sign extension away and widens 0xffe4 to
++// 0x0000ffe4 instead of 0xffffffE4. That costs the upper half of every negative
++// immediate, and it stays invisible until the register is multiplied -- a
++// `s_movk_i32 sN, -28` feeding v_mad_i32_i24 against a work-item id produces a
++// result low by exactly lane<<16, which reads downstream as a corrupted
++// address. See amd/emu/gcn3/alusopk.go, which widens the int16 directly.
+ func (u *ALU) runSMOVKI32(state emu.InstEmuState) {
+ 	inst := state.Inst()
+ 	imm := emu.AsInt16(uint16(state.ReadOperand(inst.SImm16, 0) & 0xffff))
+-	state.WriteOperand(inst.Dst, 0, uint64(emu.Int16ToBits(imm)))
++	state.WriteOperand(inst.Dst, 0, uint64(imm))
+ }
+ 
++// runSCMOVKI32 implements s_cmovk_i32: the s_movk_i32 write under SCC.
+ func (u *ALU) runSCMOVKI32(state emu.InstEmuState) {
+ 	inst := state.Inst()
+ 	if state.SCC() == 1 {
+ 		imm := emu.AsInt16(uint16(state.ReadOperand(inst.SImm16, 0) & 0xffff))
+-		state.WriteOperand(inst.Dst, 0, uint64(emu.Int16ToBits(imm)))
++		state.WriteOperand(inst.Dst, 0, uint64(imm))
+ 	}
+ }
+ 
+diff --git a/amd/emu/cdna3/vop1.go b/amd/emu/cdna3/vop1.go
+index 09f4ed4..129bda1 100644
+--- a/amd/emu/cdna3/vop1.go
++++ b/amd/emu/cdna3/vop1.go
+@@ -58,7 +58,7 @@ func (u *ALU) runVOP1(state emu.InstEmuState) {
+ 	case 45:
+ 		u.runVFFBHU32(state)
+ 	case 56:
+-		u.runVMOVRELSDB32(state)
++		u.runVMOVB64(state)
+ 	case 76:
+ 		u.runLogLegacyF32(state)
+ 	default:
+@@ -472,30 +472,35 @@ func (u *ALU) runVFFBHU32(state emu.InstEmuState) {
+ 	}
+ }
+ 
+-func (u *ALU) runVMOVRELSDB32(state emu.InstEmuState) {
++func (u *ALU) runLogLegacyF32(state emu.InstEmuState) {
+ 	inst := state.Inst()
+ 	exec := state.EXEC()
+ 	for i := 0; i < 64; i++ {
+ 		if exec&(1<<uint(i)) == 0 {
+ 			continue
+ 		}
+-		// Full relative source+destination behavior depends on M0/GPR indexing mode,
+-		// which is not modeled in this ALU path yet. For current CDNA3 benchmarks,
+-		// M0 remains 0, which makes this instruction equivalent to a lane-wise move.
+-		src0 := state.ReadOperand(inst.Src0, i)
+-		state.WriteOperand(inst.Dst, i, src0)
++		src := math.Float32frombits(uint32(state.ReadOperand(inst.Src0, i)))
++		dst := float32(math.Log2(float64(src)))
++		state.WriteOperand(inst.Dst, i, uint64(math.Float32bits(dst)))
+ 	}
+ }
+ 
+-func (u *ALU) runLogLegacyF32(state emu.InstEmuState) {
++// runVMOVB64 copies a 64-bit source register pair to a 64-bit destination pair.
++// VOP1 opcode 56; CDNA3 emits it for wide moves such as v_mov_b64_e32 v[a:b],
++// v[c:d], and it was absent, so such a word fell through to the neighbouring
++// v_movrelsd_b32 -- a DS-relative store -- leaving the destination unwritten.
++//
++// This replaces runVMOVRELSDB32, which opcode 56 used to dispatch to. That handler
++// is removed rather than left unreferenced: nothing calls it now, and a restore of
++// the gfx9 spelling needs its M0/GPR-relative addressing back, which is the part it
++// never modelled in the first place.
++func (u *ALU) runVMOVB64(state emu.InstEmuState) {
+ 	inst := state.Inst()
+ 	exec := state.EXEC()
+ 	for i := 0; i < 64; i++ {
+ 		if exec&(1<<uint(i)) == 0 {
+ 			continue
+ 		}
+-		src := math.Float32frombits(uint32(state.ReadOperand(inst.Src0, i)))
+-		dst := float32(math.Log2(float64(src)))
+-		state.WriteOperand(inst.Dst, i, uint64(math.Float32bits(dst)))
++		state.WriteOperand(inst.Dst, i, state.ReadOperand(inst.Src0, i))
+ 	}
+ }
+diff --git a/amd/insts/decodetable.go b/amd/insts/decodetable.go
+index f7dd259..1e431b9 100644
+--- a/amd/insts/decodetable.go
++++ b/amd/insts/decodetable.go
+@@ -168,7 +168,7 @@ func (d *Disassembler) initializeDecodeTable() {
+ 	d.addInstType(&InstType{"v_clrexcp", 53, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+ 	d.addInstType(&InstType{"v_movreld_b32", 54, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+ 	d.addInstType(&InstType{"v_movrels_b32", 55, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+-	d.addInstType(&InstType{"v_movrelsd_b32", 56, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
++	d.addInstType(&InstType{"v_mov_b64", 56, FormatTable[VOP1], 0, ExeUnitVALU, 64, 64, 0, 0, 0})
+ 	d.addInstType(&InstType{"v_cvt_f16_u16", 57, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+ 	d.addInstType(&InstType{"v_cvt_f16_i16", 58, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+ 	d.addInstType(&InstType{"v_cvt_u16_f16", 59, FormatTable[VOP1], 0, ExeUnitVALU, 32, 32, 32, 0, 0})
+diff --git a/amd/insts/decodetable_test.go b/amd/insts/decodetable_test.go
+new file mode 100644
+index 0000000..74a372f
+--- /dev/null
++++ b/amd/insts/decodetable_test.go
+@@ -0,0 +1,44 @@
++package insts_test
++
++import (
++	"testing"
++
++	"github.com/sarchlab/mgpusim/v5/amd/insts"
++)
++
++// VOP1 opcode 56 is two instructions depending on the target: v_movrelsd_b32, a
++// DS-relative store, on gfx9, and v_mov_b64, a 64-bit register move, on gfx940+,
++// which is where LLVM gates it. The decode table is a single architecture-agnostic
++// list, so one entry has to name the one this table is used for -- and a 64-bit
++// register move decoded as a 32-bit one copies the low word of every pair and leaves
++// the high word stale, which reads downstream as a corrupted address rather than as
++// a missing instruction.
++//
++// This is the assertion that fails if the entry is reverted. It cannot live in the
++// cdna3 emulator test, which builds its operands by hand and so never sees the
++// widths the table supplies.
++func TestVOP1Opcode56DecodesAsVMOVB64(t *testing.T) {
++	// v_mov_b64_e32 v[0:1], v[2:3]: VOP1 is Encoding 0x7E000000 under Mask
++	// 0xFE000000, opcode in bits 16..9, source in bits 8..0 and destination in bits
++	// 24..17. This is the word clang emits for the pair copy in
++	// website/tests/fixtures/cdna3-mov-b64.cu, verified with cmd/instdump.
++	buf := []byte{0x02, 0x71, 0x00, 0x7e}
++
++	inst, err := insts.NewDisassembler().Decode(buf)
++	if err != nil {
++		t.Fatalf("decode 0x7e007102: %v", err)
++	}
++	if inst.InstType == nil {
++		t.Fatal("0x7e007102 decoded with no instruction type")
++	}
++	if inst.InstType.InstName != "v_mov_b64" {
++		t.Errorf("VOP1 opcode 56 decoded as %q, want v_mov_b64", inst.InstType.InstName)
++	}
++	if inst.DSTWidth != 64 || inst.SRC0Width != 64 {
++		t.Errorf("VOP1 opcode 56 has dst width %d and src0 width %d, want 64 and 64: a 32-bit pair copy drops the high word of every pair",
++			inst.DSTWidth, inst.SRC0Width)
++	}
++	if inst.Dst.RegCount != 2 || inst.Src0.RegCount != 2 {
++		t.Errorf("VOP1 opcode 56 decoded %d destination and %d source registers, want 2 and 2", inst.Dst.RegCount, inst.Src0.RegCount)
++	}
++}

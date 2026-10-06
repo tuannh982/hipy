@@ -1,0 +1,45 @@
+{
+  "name": "hipy-website",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run prepare-assets && vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "prepare-assets": "node --import tsx scripts/prepare-assets.mjs",
+    "prepare-wasm": "node scripts/prepare-wasm.mjs",
+    "compile-smoke": "node --import tsx scripts/compile-pipeline-smoke.mjs",
+    "class-audit": "node scripts/class-audit.mjs",
+    "pretest": "npm run prepare-wasm",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "test:toolchain": "node --import tsx --test tests/toolchain.test.mjs",
+    "test:libcudart": "node --import tsx --test tests/libcudart.test.mjs",
+    "test:simulator": "node --import tsx --test tests/simulator.test.mjs",
+    "test:correctness": "node --import tsx --test tests/correctness.test.mjs",
+    "test:lds": "node --import tsx --test tests/lds.test.mjs",
+    "test:all": "npm run test:libcudart && npm run test:toolchain && npm run test:simulator && npm run test:correctness && npm run test:lds",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/sim-smoke.mjs"
+  },
+  "dependencies": {
+    "@wasmer/sdk": "0.16.0",
+    "d3-array": "3.2.4",
+    "d3-scale": "4.0.2",
+    "d3-shape": "3.2.0",
+    "monaco-editor": "0.57.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/d3-array": "3.2.2",
+    "@types/d3-scale": "4.0.9",
+    "@types/d3-shape": "3.2.0",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "esbuild": "0.28.1",
+    "tsx": "4.20.3",
+    "typescript": "5.9.2",
+    "vite": "8.3.1"
+  }
+}

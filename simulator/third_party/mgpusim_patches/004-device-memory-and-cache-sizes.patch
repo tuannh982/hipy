@@ -1,0 +1,288 @@
+diff --git a/amd/driver/builder.go b/amd/driver/builder.go
+index a0af727..2f9676c 100644
+--- a/amd/driver/builder.go
++++ b/amd/driver/builder.go
+@@ -27,11 +27,27 @@ type Builder struct {
+ 	spec      Spec
+ 	resources Resources
+ 	registrar modeling.Registrar
++
++	// cpuMemSize is how much host memory the CPU device gets. It is a field
++	// rather than the constant it used to be because the shared storage is sized
++	// from the caller's own figure: with the two disagreeing, the driver's memory
++	// allocator hands the host physical addresses past the end of the storage that
++	// backs them, and the first host-to-device copy panics inside the memory
++	// controller with a physical address nobody can explain.
++	cpuMemSize uint64
+ }
+ 
+ // MakeBuilder creates a driver builder seeded with the default spec.
+ func MakeBuilder() Builder {
+-	return Builder{spec: defaultSpec}
++	return Builder{spec: defaultSpec, cpuMemSize: 4 * mem.GB}
++}
++
++// WithCPUMemSize sets how much host memory the CPU device gets, in bytes. It
++// must match the host half of the shared storage, since every physical address
++// the allocator hands out has to be inside it.
++func (b Builder) WithCPUMemSize(size uint64) Builder {
++	b.cpuMemSize = size
++	return b
+ }
+ 
+ // WithRegistrar wires the builder to a registrar (a *simulation.Simulation in
+@@ -123,7 +139,7 @@ func (b *Builder) createCPU(d *Driver) {
+ 		Type:     internal.DeviceTypeCPU,
+ 		MemState: internal.NewDeviceMemoryState(d.Log2PageSize),
+ 	}
+-	cpu.SetTotalMemSize(4 * mem.GB)
++	cpu.SetTotalMemSize(b.cpuMemSize)
+ 
+ 	d.memAllocator.RegisterDevice(cpu)
+ 	d.devices = append(d.devices, cpu)
+diff --git a/amd/samples/runner/timingconfig/builder.go b/amd/samples/runner/timingconfig/builder.go
+index 92ed4f7..e2b696c 100644
+--- a/amd/samples/runner/timingconfig/builder.go
++++ b/amd/samples/runner/timingconfig/builder.go
+@@ -45,6 +45,19 @@ type Builder struct {
+ 
+ 	globalStorage     *mem.Storage
+ 	rdmaAddressMapper *mem.BankedAddressPortMapper
++
++	// Cache and DRAM size overrides, zero meaning "whatever the device builder
++	// defaults to". Held here rather than applied by the caller because the caller
++	// only ever holds a timingconfig.Builder: createGPUBuilder is what constructs
++	// the per-device builder, so without these there is no way to reach
++	// WithL2CacheSize and friends from outside this package at all.
++	//
++	// Zero rather than a "use default" bool, so an unset field cannot be confused
++	// with a request for a zero-sized cache.
++	l1vCacheSize  uint64
++	l2CacheSize   uint64
++	mallCacheSize uint64
++	dramSize      uint64
+ }
+ 
+ // MakeBuilder creates a new Builder with default parameters.
+@@ -88,6 +101,74 @@ func (b Builder) WithGPUType(gpuType string) Builder {
+ 	return b
+ }
+ 
++// WithGPUMemSize sets the device memory each GPU gets, in bytes, and the host
++// memory beside it.
++//
++// Both, because Build refuses a configuration where they differ
++// (cpuGPUMemSizeMustEqual): the shared backing store is sized from the sum, and
++// the driver is told one DRAMSize for the device and the page table is walked
++// against the host half. Changing one without the other is not a smaller
++// configuration, it is a rejected one, so a caller asking for a device with less
++// memory than the default is asking for less host memory too.
++//
++// Not a substitute for the memory a real card has. This is how much the model
++// hands a kernel, and it is what bounds the device allocator.
++func (b Builder) WithGPUMemSize(size uint64) Builder {
++	b.gpuMemSize = size
++	b.cpuMemSize = size
++	return b
++}
++
++// WithL1VCacheSize sets the L1 data cache size PER CU, in bytes. Zero leaves
++// the device builder's default. Per CU because one is built per CU.
++func (b Builder) WithL1VCacheSize(size uint64) Builder {
++	b.l1vCacheSize = size
++	return b
++}
++
++// WithL2CacheSize sets the total L2 size, in bytes, shared across its banks.
++// Zero leaves the device builder's default.
++func (b Builder) WithL2CacheSize(size uint64) Builder {
++	b.l2CacheSize = size
++	return b
++}
++
++// WithMALLCacheSize sets the MALL (Infinity Cache) size, in bytes. Zero leaves
++// the device builder's default, and does nothing on a device with no MALL.
++func (b Builder) WithMALLCacheSize(size uint64) Builder {
++	b.mallCacheSize = size
++	return b
++}
++
++// WithDramSize sets the device memory the memory controllers are built to
++// address, in bytes. Zero leaves the device builder's default.
++//
++// NOT the same figure as WithGPUMemSize: that one sizes the shared backing
++// store and bounds the allocator, this one is the range the controllers cover.
++func (b Builder) WithDramSize(size uint64) Builder {
++	b.dramSize = size
++	return b
++}
++
++// GPUMemSize reports the device memory this configuration gives each GPU, in
++// bytes. It is the figure createGPU hands the driver as
++// driver.DeviceProperties.DRAMSize, which is in turn what bounds the device
++// memory allocator, so it is the modelled VRAM capacity rather than a spec.
++//
++// It is readable before Build, and deliberately so: describe the platform a
++// configuration would build without building it. That is only worth saying for
++// this one figure -- every other property of a platform can only be read off
++// components that exist once it has been built, and a caller wanting those has
++// to build. So a caller wanting the whole configuration builds once and reads
++// the rest off the result; this exists for the caller that has to describe
++// several devices, one of which it is not about to simulate.
++//
++// Not affected by adjustConfigForGPUType, which retunes CU and SA counts and
++// leaves the memory size alone.
++func (b Builder) GPUMemSize() uint64 {
++	return b.gpuMemSize
++}
++
+ // Build builds the hardware platform and returns the driver. The driver, the
+ // GPUs, and all the connections register themselves with the simulation.
+ func (b Builder) Build() *driver.Driver {
+@@ -172,6 +253,11 @@ func (b *Builder) buildGPUDriver(
+ 	gpuDriver := driver.MakeBuilder().
+ 		WithRegistrar(b.simulation).
+ 		WithSpec(spec).
++		// The host half of the shared storage, so the driver's CPU device ends up
++		// with exactly the room the storage backing it has. Leaving the driver's
++		// own 4 GiB default in place here is what makes a configuration with less
++		// than 4 GiB per side fail on its first host-to-device copy.
++		WithCPUMemSize(b.cpuMemSize).
+ 		WithResources(driver.Resources{
+ 			PageTable:     pageTable,
+ 			GlobalStorage: b.globalStorage,
+@@ -213,16 +299,44 @@ func (b *Builder) createGPUBuilder(
+ 
+ 	driverPort := gpuDriver.GetPortByName(driver.GPUPortName).AsRemote()
+ 
++	// The overrides are applied FIRST, while the builder is still the concrete
++	// device type. Several setters below return the gpubuilder.GPUBuilder
++	// interface rather than the concrete type, and the cache setters are not on
++	// that interface, so applying them once the chain has widened the type will
++	// not compile.
+ 	switch b.gpuType {
+ 	case "mi300x":
+-		return mi300x.MakeBuilder().
++		builder := mi300x.MakeBuilder()
++		if b.l1vCacheSize > 0 {
++			builder = builder.WithL1VCacheSize(b.l1vCacheSize)
++		}
++		if b.l2CacheSize > 0 {
++			builder = builder.WithL2CacheSize(b.l2CacheSize)
++		}
++		if b.mallCacheSize > 0 {
++			builder = builder.WithMALLCacheSize(b.mallCacheSize)
++		}
++		if b.dramSize > 0 {
++			builder = builder.WithDramSize(b.dramSize)
++		}
++		return builder.
+ 			WithSimulation(b.simulation).
+ 			WithMMU(mmuComponent).
+ 			WithLog2PageSize(b.log2PageSize).
+ 			WithGlobalStorage(b.globalStorage).
+ 			WithDriverPort(driverPort)
+ 	default:
+-		return r9nano.MakeBuilder().
++		builder := r9nano.MakeBuilder()
++		if b.l1vCacheSize > 0 {
++			builder = builder.WithL1VCacheSize(b.l1vCacheSize)
++		}
++		if b.l2CacheSize > 0 {
++			builder = builder.WithL2CacheSize(b.l2CacheSize)
++		}
++		if b.dramSize > 0 {
++			builder = builder.WithDramSize(b.dramSize)
++		}
++		return builder.
+ 			WithSimulation(b.simulation).
+ 			WithMMU(mmuComponent).
+ 			WithLog2PageSize(b.log2PageSize).
+diff --git a/amd/samples/runner/timingconfig/mi300x/builder.go b/amd/samples/runner/timingconfig/mi300x/builder.go
+index a6a86a2..f225bc8 100644
+--- a/amd/samples/runner/timingconfig/mi300x/builder.go
++++ b/amd/samples/runner/timingconfig/mi300x/builder.go
+@@ -78,6 +78,7 @@ type Builder struct {
+ 	numCUPerShaderArray            int
+ 	numShaderArray                 int
+ 	l2CacheSize                    uint64
++	l1vCacheSize                   uint64
+ 	l2BankLatency                  int
+ 	mallCacheSize                  uint64
+ 	mallBankLatency                int
+@@ -124,7 +125,8 @@ func MakeBuilder() Builder {
+ 		// MI300X L2 is a per-XCD 4 MB cache (16-way, 16x256 KB channels). A
+ 		// single work-item touches only its own XCD's L2, so the cache_latency
+ 		// pointer chase sees 4 MB here, not the device-wide aggregate.
+-		l2CacheSize: 4 * mem.MB,
++		l2CacheSize:  4 * mem.MB,
++		l1vCacheSize: 32 * mem.KB,
+ 		// L2 bank latency in cycles. Tuned so an L1-miss/L2-hit dependent load
+ 		// lands near the ~60-100 ns the real MI300X L2 shows in cache_latency.
+ 		// 124 cyc / 2.1 GHz = ~59 ns (was 100 cyc / 1.7 GHz = ~59 ns).
+@@ -202,6 +204,13 @@ func (b Builder) WithNumShaderArray(numShaderArray int) Builder {
+ }
+ 
+ // WithL2CacheSize sets the size of the L2 cache.
++// WithL1VCacheSize sets the L1 data cache size PER CU, in bytes, overriding the
++// 32 KB this device otherwise builds.
++func (b Builder) WithL1VCacheSize(size uint64) Builder {
++	b.l1vCacheSize = size
++	return b
++}
++
+ func (b Builder) WithL2CacheSize(size uint64) Builder {
+ 	b.l2CacheSize = size
+ 	return b
+@@ -589,7 +598,7 @@ func (b *Builder) buildSAs() {
+ 		WithVecMemTransPipelineStages(4).
+ 		WithVecMemTransPipelineWidth(8).
+ 		WithCUMemPipelineBufferSize(64).
+-		WithL1VCacheSize(32 * mem.KB).
++		WithL1VCacheSize(b.l1vCacheSize).
+ 		WithL1VBankLatency(9). // ~4.3 ns at 2.1 GHz (was 7 cyc / 1.7 GHz)
+ 		WithMemPipelineBufferSize(64).
+ 		WithMaxCoalescingPenalty(3).
+diff --git a/amd/samples/runner/timingconfig/r9nano/builder.go b/amd/samples/runner/timingconfig/r9nano/builder.go
+index 76b280f..3369bfe 100644
+--- a/amd/samples/runner/timingconfig/r9nano/builder.go
++++ b/amd/samples/runner/timingconfig/r9nano/builder.go
+@@ -47,6 +47,7 @@ type Builder struct {
+ 	numCUPerShaderArray            int
+ 	numShaderArray                 int
+ 	l2CacheSize                    uint64
++	l1vCacheSize                   uint64
+ 	numMemoryBank                  int
+ 	log2CacheLineSize              uint64
+ 	log2PageSize                   uint64
+@@ -145,6 +146,17 @@ func (b Builder) WithNumShaderArray(numShaderArray int) Builder {
+ }
+ 
+ // WithL2CacheSize sets the size of the L2 cache.
++// WithL1VCacheSize sets the L1 data cache size PER CU, in bytes, overriding the
++// shader array builder's default.
++//
++// Forwarded rather than applied here because the L1 caches belong to the shader
++// arrays, which this builder constructs; there is no field on this builder for it
++// until now.
++func (b Builder) WithL1VCacheSize(size uint64) Builder {
++	b.l1vCacheSize = size
++	return b
++}
++
+ func (b Builder) WithL2CacheSize(size uint64) Builder {
+ 	b.l2CacheSize = size
+ 	return b
+@@ -462,6 +474,12 @@ func (b *Builder) buildSAs() {
+ 		WithL1AddressMapper(b.l1AddressMapper).
+ 		WithL1TLBAddressMapper(b.l1TLBAddressMapper)
+ 
++	// Applied only when asked for, so an unset override leaves the shader array
++	// builder's own default rather than building a zero-byte cache.
++	if b.l1vCacheSize > 0 {
++		saBuilder = saBuilder.WithL1VCacheSize(b.l1vCacheSize)
++	}
++
+ 	for i := 0; i < b.numShaderArray; i++ {
+ 		saName := fmt.Sprintf("%s.SA[%d]", b.name, i)
+ 		sa := saBuilder.Build(saName)

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="10" fill="#1e1e1e"/>
+  <g fill="#cccccc">
+    <path transform="translate(6,6)" d="M0,0 H6.5 V7.75 H23 V0 H29.5 V22 H23 V14.25 H6.5 V22 H0 Z"/>
+    <path transform="translate(51.5,6)" d="M0,0 H6.5 V22 H0 Z"/>
+    <path transform="translate(6,32)" fill-rule="evenodd" d="M0,0 H19 V17 H6.5 V22 H0 Z M6.5,6.5 H12.5 V10.5 H6.5 Z"/>
+    <path transform="translate(36,32)" d="M0,0 H6.5 L14.25,14 H7.75 Z M14.25,14 H7.75 L15.5,0 H22 Z M7.75,14 H14.25 V22 H7.75 Z"/>
+  </g>
+</svg>

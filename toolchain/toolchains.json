@@ -1,0 +1,25 @@
+{
+  "$comment": "The toolchains the playground can compile for, and the devices each one serves. This is the join between three things that otherwise drift: the driver wasm the browser fetches (driverArtifact, driverFile), the flags the device pass needs (triple, devicePassArgs, offloadTargetPrefix), and the simulator's own device registry (devices). A device id is the key everywhere -- simulator/harness/device.go names a Toolchain and an arch for every entry it builds, website/src/lib/compilePipeline.ts looks the toolchain up here from the id the catalog reported, and website/scripts/prepare-assets.mjs stages one driver and one archive per entry. simulator/harness/device_test.go asserts that every registry entry resolves to a row here, so a device can name a toolchain this file does not have without any of them failing silently. defaultArch is what the shell build path emits when a caller names no device and no arch, and it is per toolchain rather than global: an nvptx row would carry an sm_ target and no gfx name at all. arch is spelled per device because one toolchain covers a whole family: a second AMD part, or an NVIDIA one under a toolchain of its own, is a devices entry and not a new toolchain unless its DRIVER wasm differs. id is the stable key every side looks a row up by, so it must stay put across a label rewording. cdna3generic is listed because it is selectable: its kernels run correctly on gfx942, checked element by element against a CPU reference by website/tests/correctness.test.mjs, which runs every fixture on every device the simulator registry marks selectable. That pass rate is what a regression here would show up as. It is a correctness result over those kernels, not an opcode-coverage or timing-model audit of CDNA3.  gfx942 is what that row maps cdna3generic to; the name MGPUSim's own builder switches on is a different string, carried on the entry as Device.SimulatorType.",
+  "version": 1,
+  "toolchains": [
+    {
+      "id": "amdgcn",
+      "label": "AMD GPU (amdgcn-amd-amdhsa)",
+      "driverArtifact": "llvm-driver-stripped.wasm",
+      "driverFile": "llvm-driver-v1.wasm",
+      "triple": "amdgcn-amd-amdhsa",
+      "devicePassArgs": ["-fcuda-is-device", "-fhip-new-launch-api"],
+      "offloadTargetPrefix": "hipv4-amdgcn-amd-amdhsa--",
+      "defaultArch": "gfx803",
+      "archiveDirs": [
+        { "from": "src/shim", "to": "shim" },
+        { "from": "artifacts/build-wasm/lib/clang/19", "to": "resource" },
+        { "from": "artifacts/wasix-sysroot", "to": "sysroot" }
+      ],
+      "devices": {
+        "gcn3generic": "gfx803",
+        "cdna3generic": "gfx942"
+      }
+    }
+  ]
+}

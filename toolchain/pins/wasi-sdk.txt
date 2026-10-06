@@ -1,0 +1,9 @@
+tag=wasi-sdk-25
+url=https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-arm64-macos.tar.gz
+sha256=e1e529ea226b1db0b430327809deae9246b580fa3cae32d31c82dfe770233587
+# Variant note: this is the macOS arm64 (Apple Silicon) tarball, matching the
+# machine the toolchain was built on (Darwin arm64). Other hosts must swap in
+# their platform variant (e.g. wasi-sdk-25.0-x86_64-linux.tar.gz) and update
+# the sha256 accordingly. Verified by comparing VERSION file + bin/clang and
+# share/wasi-sysroot/lib/wasm32-wasi/libc.a hashes with a fresh download.
+tar_root=wasi-sdk-25.0-arm64-macos

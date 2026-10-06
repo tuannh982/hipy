@@ -1,0 +1,53 @@
+{
+  "$comment": "The compile-time and launch-time rejections of the v1 playground, and for each one the stable identifying prefix of the diagnostic it produces -- not always the whole string. Three of the six sites append a clause or a source location after this prefix: the fp16 header appends \"; use float32 instead\", check-fp32.mjs appends \" (path:line)\", and the harness appends the kernel name and byte count. So the suite matches by substring, and a reworded suffix does not fail it while a reworded boundary does. fp64 is the one boundary two sites enforce, check-fp32.mjs writing \" (path:line)\" and website/src/lib/compilePipeline.ts writing \" (source.cu:line)\"; they share the prefix below, so it is one row and not two. Read by tests/scripts/compile-failure-test.mjs, which compiles each compile-phase fixture and asserts the prefix is what the shim emitted, and by website/src/components/ToolchainBoundaries.tsx, which renders it once something mounts it on the About tab; also by the two sites that enforce them, tests/scripts/compile-test.mjs and website/src/lib/compilePipeline.ts, which read their row here. The enforcement does not read this file and must not be made to: these strings are checked against the headers and scripts that write them, a row that is not a substring of the real diagnostic fails the suite, and the fix is always the row. fixture names a file in tests/cuda/ for phase \"compile\" and is empty for phase \"launch\", which no fixture exercises. Every unsupported-*.cu in tests/cuda/ must appear as some row's fixture, so a new fixture cannot be added without one. id is the stable key a caller looks a row up by when it has no fixture to name it after -- the browser enforcing fp64 has no .cu file -- so it must stay put across a label rewording.",
+  "boundaries": [
+    {
+      "id": "fp64",
+      "fixture": "unsupported-fp64.cu",
+      "message": "HIP playground v1 is float32-only: fp64 is not supported",
+      "label": "fp64",
+      "detail": "A double-precision kernel is rejected at compile. There is no fp64 path in the model, so it is not approximated as fp32.",
+      "phase": "compile"
+    },
+    {
+      "id": "cublas",
+      "fixture": "unsupported-header.cu",
+      "message": "HIP playground v1 does not support <cublas_v2.h>",
+      "label": "<cublas_v2.h>",
+      "detail": "Not shipped by the shim. There is no library path in the model.",
+      "phase": "compile"
+    },
+    {
+      "id": "fp16",
+      "fixture": "unsupported-cuda-fp16.cu",
+      "message": "HIP playground v1 does not support <cuda_fp16.h>",
+      "label": "<cuda_fp16.h>",
+      "detail": "Half precision is not modelled. Use float32.",
+      "phase": "compile"
+    },
+    {
+      "id": "cooperative-groups",
+      "fixture": "unsupported-cooperative-groups.cu",
+      "message": "HIP playground v1 does not support <cooperative_groups.h>",
+      "label": "<cooperative_groups.h>",
+      "detail": "Grid synchronisation is not modelled. There is a barrier primitive; there is no cooperative launch.",
+      "phase": "compile"
+    },
+    {
+      "id": "atomics",
+      "fixture": "unsupported-atomic.cu",
+      "message": "atomic operations are not supported by the simulator in v1",
+      "label": "Atomics",
+      "detail": "atomicAdd and friends are a compile-time failure. A reduction that needs them has to be restructured.",
+      "phase": "compile"
+    },
+    {
+      "id": "dynamic-shared-memory",
+      "fixture": "",
+      "message": "dynamic shared memory is not supported in v1",
+      "label": "Dynamic shared memory",
+      "detail": "cudaMalloc inside the kernel is rejected at launch. Use a static __shared__ array instead, which is what the LDS analyzer reads.",
+      "phase": "launch"
+    }
+  ]
+}

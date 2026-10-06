@@ -1,0 +1,1520 @@
+/* VSCode Dark Modern. Every colour is a token; no rule below carries a literal, so
+   the whole theme is one edit away from Light or High Contrast. */
+
+:root {
+  color-scheme: dark;
+
+  --vscode-sideBar-bg: #252526;
+  --vscode-editor-bg: #1e1e1e;
+  --vscode-panel-bg: #252526;
+  --vscode-panelTitle-activeBg: #2d2d2d;
+  --vscode-panelTitle-inactiveBg: #252526;
+  --vscode-editorWidget-bg: #252526;
+  --vscode-dropdown-bg: #1e1e1e;
+
+  --vscode-foreground: #cccccc;
+  --vscode-descriptionForeground: #9d9d9d;
+  --vscode-disabledForeground: #6e6e6e;
+  --vscode-errorForeground: #f48771;
+
+  --vscode-panel-border: #2b2b2b;
+  --vscode-editorGroup-border: #2b2b2b;
+  --vscode-focusBorder: #007fd4;
+
+  --vscode-button-bg: #007acc;
+  --vscode-button-hoverBg: #026ec1;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-dangerBg: #c72e0f;
+
+  --vscode-badge-background: #4d4d4d;
+  --vscode-badge-foreground: #ffffff;
+
+  --vscode-progressBar-background: #007acc;
+  --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-activeSelectionBackground: #04395e;
+  --vscode-list-activeSelectionForeground: #ffffff;
+
+  --vscode-scrollbarSlider-background: #79797966;
+  --vscode-scrollbarSlider-hoverBackground: #646464b3;
+  --vscode-scrollbarSlider-activeBackground: #bfbfbf66;
+
+  --vscode-code-block-background: #0d0d0d;
+
+  /* Two chart hues, for the two directions DRAM traffic goes. A reader's first
+     question about DRAM is which way it is flowing, so read and write must not be
+     the same colour. */
+  --chart-read: #38bdf8;
+  --chart-write: #a78bfa;
+  /* Occupancy, and device memory. Distinct from the two traffic directions
+     because neither is a direction: read/write are opposites that must be told
+     apart, these are magnitudes that never appear beside one another. */
+  --chart-share: #4ec9b0;
+  --chart-memory: #dcdcaa;
+
+  /* Semantic roles the brief's block does not cover but the UI needs. Named for
+     what VSCode calls them, because that is the thing being imitated. The
+     unreferenced tokens above and the --chart-* tokens came from the brief's
+     mandated skeleton and stay for that reason. */
+  --vscode-editorLineNumber-foreground: #6e7681;
+  --vscode-editorWarning-foreground: #cca700;
+  --vscode-editorInfo-foreground: #3794ff;
+  --vscode-editorError-foreground: #f14c4c;
+  --vscode-editorSuccess-foreground: #89d185;
+  --vscode-input-border: #3c3c3c;
+  --vscode-textLink-foreground: #3794ff;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--vscode-editor-bg);
+  color: var(--vscode-foreground);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* Typography. VSCode's chrome is small and flat. */
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+h2 {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.eyebrow {
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Layout. Flat panes on one dark field, split by a 1px line. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--vscode-editor-bg);
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 35px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-bg);
+}
+
+.brand,
+.editor-toolbar,
+.run-actions,
+.section-title,
+.chart-heading {
+  display: flex;
+  align-items: center;
+}
+
+.brand {
+  gap: 10px;
+}
+
+.brand-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+/* Three tracks: the editor, the divider, the output panel. The editor's width comes
+   from --editor-width, which the divider writes while it is dragged, so the default
+   is the 3fr/2fr split.
+
+   The property rather than an inline track list: the narrow-viewport rule at the
+   bottom of this file collapses this grid to one column and hides the divider, and
+   an inline value would outrank it. */
+.workspace {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, var(--editor-width, 3fr)) 6px minmax(380px, 2fr);
+}
+
+.editor-pane,
+.output-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The divider between the panes. A 6px track with nothing in it but a 1px line: wide
+   enough to grab with a pointer, thin enough not to read as a panel. The line is a
+   pseudo-element rather than a border so it can be inset from the track's edges and
+   widen on hover without moving anything.
+
+   touch-action: none is what makes a touch drag reach the pointer handlers at all:
+   without it the browser claims the gesture for scrolling. */
+.pane-divider {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.pane-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--vscode-panel-border);
+}
+
+.pane-divider:hover::after,
+.pane-divider:focus-visible::after,
+.pane-divider.dragging::after {
+  background: var(--vscode-focusBorder);
+}
+
+/* The focus ring is the divider's only affordance for a keyboard user. */
+.pane-divider:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.output-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editor-bg);
+}
+
+/* Toolbar. A VSCode title bar row: controls at the natural size they are set at,
+   and the row itself carrying no fill of its own beyond the separator under it. */
+.editor-toolbar {
+  min-height: 35px;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-bg);
+}
+
+.editor-toolbar .example-select {
+  margin-right: auto;
+}
+
+/* A wrap, but only as a last resort. The divider can make the editor pane narrow at
+   ANY viewport width, so the narrow-viewport media query cannot handle it: that
+   query sees the window, not the pane.
+
+   Nothing in here wraps its text: a wrapped label either overflows a fixed-height
+   box or grows the row and shoves the editor down. */
+.editor-toolbar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+/* The two labels are short and fixed; the selects beside them are what gives
+   way. min-width 0 is what allows that, and the small floor below is what keeps
+   a select recognisable as a select when the pane is at its narrowest. */
+.example-select {
+  min-width: 0;
+}
+
+.example-select > span {
+  flex: none;
+}
+
+/* The toolbar holds two selects -- the example picker and the device -- and
+   only the first one should push the rest of the toolbar to the far end. With
+   both auto-margined the free space splits between them and the device select
+   drifts to the middle of the bar instead of sitting beside the picker. */
+.editor-toolbar .example-select + .example-select {
+  margin-right: 0;
+}
+
+.example-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+select {
+  /* A floor the toolbar can reach: the two selects must leave the divider enough
+     room for the run button. */
+  min-width: 80px;
+  height: 24px;
+  padding: 0 22px 0 6px;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 0;
+  appearance: none;
+  outline: none;
+  color: var(--vscode-foreground);
+  background: var(--vscode-dropdown-bg);
+  font-size: 12px;
+}
+
+.example-select select {
+  min-width: 100px;
+}
+
+select:focus {
+  border-color: var(--vscode-focusBorder);
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* The stage indicator. A VSCode status item is a flat label with a small square
+   glyph, and the run's stage is the one thing in the toolbar worth colouring.
+
+   min-width 0 with an ellipsis: the stage is the shortest-lived thing in the
+   toolbar, so it is the right thing to truncate when the pane is narrow. */
+.stage-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+/* The ellipsis lives here and not on .stage-pill, which is a flex container:
+   text-overflow has no effect on a flex container's own text, because the text sits
+   in an anonymous flex item it does not lay out. */
+.stage-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The glyph's shape, and the resting colour too: idle is what the base is when no run
+   is happening, so every other stage below overrides it. */
+.stage-pill i {
+  width: 8px;
+  height: 8px;
+  background: var(--vscode-disabledForeground);
+}
+
+.stage-downloading i,
+.stage-device i,
+.stage-host i,
+.stage-link i,
+.stage-simulating i {
+  background: var(--vscode-editorInfo-foreground);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.stage-complete i {
+  background: var(--vscode-editorSuccess-foreground);
+}
+
+.stage-error i,
+.stage-cancelled i {
+  background: var(--vscode-editorError-foreground);
+}
+
+/* The Customize tab. Label-over-input rows rather than a grid of inputs, because
+   each field carries a hint that says what the figure MEANS and a bare number with a
+   tooltip for that is a number nobody can check. */
+.customize {
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.customize-field {
+  margin: 10px 0;
+}
+
+.customize-field > label {
+  display: block;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  margin-bottom: 3px;
+}
+
+/* The hint sits under the label rather than in a title attribute: what a size
+   means is the difference between a correct and a wrong entry, and a tooltip is
+   invisible until hovered. */
+.customize-hint {
+  display: block;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.customize-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customize-input input {
+  width: 180px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+
+/* The error, beside the field it belongs to rather than at the top of the panel:
+   an error the reader has to match to a field is one they will mis-attribute. */
+.customize-error {
+  color: var(--vscode-editorError-foreground);
+  font-size: 11px;
+}
+
+.customize-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.customize-default {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+/* The simulator module's own health. Deliberately a different shape from
+   .stage-pill: the two report different questions, and after a crash they say
+   different things at the same moment. */
+.sim-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  border: 1px solid var(--vscode-panel-border);
+  padding: 2px 6px;
+}
+
+.sim-pill i {
+  width: 6px;
+  height: 6px;
+  background: var(--vscode-disabledForeground);
+}
+
+.sim-starting i {
+  background: var(--vscode-editorInfo-foreground);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.sim-ready i {
+  background: var(--vscode-editorSuccess-foreground);
+}
+
+.sim-crashed {
+  color: var(--vscode-editorError-foreground);
+  border-color: var(--vscode-editorError-foreground);
+}
+
+.sim-crashed i {
+  background: var(--vscode-editorError-foreground);
+}
+
+.button-small {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+/* The device select's staleness marker, on the control that diverged rather than on
+   the stage pill. It needs a rule of its own because an unstyled span in the
+   toolbar's flex row would take the label's 12px grey and read as part of the
+   control's own name rather than as a warning. */
+.device-stale {
+  color: var(--vscode-editorWarning-foreground);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* flex: none, so the run button is the one control that never gives way: a flex
+   container under pressure takes space in proportion to base size, and the button
+   has the smallest base size of anything here. The clock beside it is the same:
+   tabular digits in a fixed column. */
+.run-actions {
+  flex: none;
+  gap: 8px;
+}
+
+.elapsed {
+  flex: none;
+  min-width: 48px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Buttons. Flat rectangles on the blue: no radius, no lift on hover, no glow.
+
+   nowrap is load-bearing: height is fixed at 24px, so a label that wraps renders
+   its second line outside the button and outside the toolbar row. */
+.button {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  transition: none;
+}
+
+.button-primary {
+  border-color: var(--vscode-button-bg);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-bg);
+}
+
+.button-primary:hover {
+  border-color: var(--vscode-button-hoverBg);
+  background: var(--vscode-button-hoverBg);
+}
+
+.button-danger {
+  border-color: var(--vscode-button-dangerBg);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-dangerBg);
+}
+
+.button-danger:hover {
+  filter: brightness(1.15);
+}
+
+.button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.download-progress {
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-panel-bg);
+}
+
+.download-progress > div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.download-progress progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  accent-color: var(--vscode-progressBar-background);
+}
+
+.editor-host {
+  flex: 1;
+  min-height: 0;
+  background: var(--vscode-editor-bg);
+}
+
+/* Two spans, each of which stays whole, and the row wraps rather than breaking one
+   of them across lines. Breaking the sentence is worse than breaking the row. */
+.editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: 12px;
+  min-height: 22px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-sideBar-bg);
+  font-size: 10px;
+}
+
+.editor-footer > span {
+  white-space: nowrap;
+}
+
+.editor-footer code {
+  color: var(--vscode-foreground);
+  font-family: var(--font-mono);
+}
+
+/* The tab strip. VSCode tabs are flat with an underline on the active one. */
+.tabs {
+  display: flex;
+  gap: 0;
+  min-height: 35px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-panelTitle-inactiveBg);
+}
+
+.tabs button {
+  position: relative;
+  flex: 1;
+  padding: 8px 16px;
+  appearance: none;
+  border: 0;
+  border-right: 1px solid var(--vscode-panel-border);
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.tabs button.active {
+  background: var(--vscode-panelTitle-activeBg);
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-button-bg);
+}
+
+.tabs button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* A telemetry tab that is streaming rather than finished. Never the active tab's
+   blue: the underline already says which tab is open. */
+.tabs button.partial:not(.active) {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+/* Anchored to the right edge, in the button's 16px right padding, and not centred
+   on the button: the button centres its text by UA default with symmetric padding,
+   so a percentage offset resolves onto the label. Anchoring to the padding depends
+   on nothing but the button, at any tab width and any label length. */
+.tab-dot {
+  position: absolute;
+  top: 16px;
+  left: auto;
+  right: 16px;
+  width: 6px;
+  height: 6px;
+  background: var(--vscode-editorSuccess-foreground);
+}
+
+.tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Console. VSCode's terminal is one flat background with a thin slider. */
+.console-view {
+  height: 100%;
+  min-height: 0;
+}
+
+.console-output {
+  min-height: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.console-line {
+  display: block;
+  min-height: 1.6em;
+}
+
+.console-status {
+  color: var(--vscode-descriptionForeground);
+}
+
+.console-stderr {
+  color: var(--vscode-editorError-foreground);
+}
+
+.console-stdout {
+  color: var(--vscode-foreground);
+}
+
+/* The report column, empty states and tables. */
+.report,
+.about-view {
+  padding: 14px 16px;
+}
+
+.panel-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: 30px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.report-section {
+  margin-top: 20px;
+}
+
+.section-title {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.section-title h2 {
+  font-size: 13px;
+}
+
+.muted,
+.table-note {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.table-note {
+  margin: 6px 2px 0;
+}
+
+/* The memory hierarchy strip: one row per level, DRAM last. A fixed grid so the byte
+   columns line up between levels and can be compared down the column. */
+.mem-hierarchy {
+  margin-bottom: 14px;
+}
+
+.mem-hierarchy-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.table-note-inline {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.mem-hierarchy-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--vscode-panel-border);
+}
+
+.mem-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 1fr;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.mem-row:last-child {
+  border-bottom: none;
+}
+
+/* A level this device does not have. Dimmed and struck through by the label rather
+   than zeroed, because "no MALL" is a statement about the hardware and 0 B would be
+   a claim about traffic. */
+.mem-row.absent {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+.mem-level {
+  font-weight: 600;
+}
+
+.mem-bytes {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The read and write columns carry the same hues as the DRAM chart's two series, so
+   a level's row and the chart below it are read as the same two quantities rather
+   than as two unrelated tables. */
+.mem-bytes.read {
+  color: var(--chart-read);
+}
+
+.mem-bytes.write {
+  color: var(--chart-write);
+}
+
+/* Tables. VSCode's grid view: a header band on the sidebar colour, 1px rules between
+   rows, and a hover tint rather than a zebra. */
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+}
+
+th,
+td {
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-sideBar-bg);
+  font-size: 11px;
+  font-weight: 400;
+  text-align: left;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+td:nth-child(n + 2) {
+  font-family: var(--font-mono);
+}
+
+/* The CPI stack. A chart is the one place a 2px radius is right. */
+
+.chart-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.chart-heading strong,
+.chart-heading span {
+  display: block;
+}
+
+.chart-heading strong {
+  margin-top: 3px;
+  color: var(--vscode-foreground);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.chart-heading .muted {
+  text-align: right;
+}
+
+/* The live panel. One column of charts, each a bordered block, so it reads as a stack
+   of panels rather than a wall of loose SVG. */
+.live-panel {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-panel-bg);
+}
+
+/* A title and a chart. The gap between blocks is larger than the gap inside one,
+   so the eye groups each heading with the plot under it rather than reading the
+   column as one continuous graph. */
+.chart-block {
+  margin-top: 14px;
+}
+
+.chart-block:first-of-type {
+  margin-top: 6px;
+}
+
+/* auto-fit with a floor, not two fixed columns: the pane can be any width, including
+   one where two charts side by side leaves neither room for an axis label. */
+.chart-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.chart-pair .chart-block {
+  margin-top: 14px;
+}
+
+.chart-block .chart-heading {
+  margin-bottom: 4px;
+}
+
+/* The heading is the one place on a chart that carries a CURRENT value, so it is set
+   in the same mono face as every other figure in this sheet. */
+.chart-block .chart-heading strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chart-block .chart-heading .muted {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.muted.warn {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.live-badge {
+  padding: 2px 7px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 9px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.live-badge.on {
+  border-color: var(--chart-share);
+  color: var(--chart-share);
+}
+
+/* Charts draw at 1:1 with CSS pixels, so these are heights in real units and the
+   labels below are the size they were authored at. Nothing here scales. */
+.series-chart {
+  position: relative;
+}
+
+/* The control strip above a plot. The hint is always visible rather than a hover
+   affordance: a control nobody can find is not a control. */
+.series-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-height: 14px;
+}
+
+.series-hint {
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.series-reset {
+  padding: 0 4px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.series-reset:hover {
+  border-color: var(--vscode-focusBorder);
+  color: var(--vscode-textLink-foreground);
+}
+
+/* A draggable plot, so the cursor says so. `grab` rather than `crosshair`: the
+   primary gesture is a range drag. */
+.series-plot {
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+.series-plot:active {
+  cursor: grabbing;
+}
+
+/* The ceiling a count series is bounded by. Dashed and dimmed so it reads as a bound
+   rather than as data: a series of counts has no natural top, so without it the axis
+   scales to the data's own peak. */
+.series-reference {
+  stroke: var(--vscode-descriptionForeground);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.55;
+  shape-rendering: crispEdges;
+}
+
+.series-reference-label {
+  fill: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  opacity: 0.8;
+}
+
+.series-crosshair {
+  stroke: var(--vscode-foreground);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  opacity: 0.5;
+  shape-rendering: crispEdges;
+}
+
+.series-cursor-dot {
+  stroke: var(--vscode-panel-bg);
+  stroke-width: 1;
+}
+
+/* The hover readout, drawn in SVG so it scales with the plot. An SVG text node takes
+   its fill from a class, so --chart tokens are not reachable here. */
+.series-readout {
+  pointer-events: none;
+}
+
+/* The box itself. `pointer-events: none` on the group above is what keeps the readout
+   from swallowing the pointermove that produced it. */
+.series-readout-bg {
+  fill: var(--vscode-editorWidget-background);
+  stroke: var(--vscode-panel-border);
+  stroke-width: 1;
+  opacity: 0.94;
+}
+
+.series-readout-title,
+.series-readout-row,
+.series-readout-value {
+  fill: var(--vscode-foreground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+/* A legend entry that toggles a series. A button rather than a span so it is
+   focusable and announced as pressed. */
+.legend-toggle {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.legend-toggle.off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.series-plot {
+  display: block;
+  overflow: visible;
+}
+
+.series-empty {
+  display: grid;
+  min-height: 108px;
+  place-items: center;
+  border: 1px dashed var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* One hairline per tick, at the panel border's own colour, so the grid is
+   structure rather than decoration. */
+.series-gridline {
+  stroke: var(--vscode-panel-border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.series-axis {
+  stroke: var(--vscode-panel-border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.series-axis-label {
+  fill: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+/* The axis's own title, carrying the unit. Deliberately the same size as the tick
+   labels and not bolder: it names the axis, it does not compete with the data. */
+.series-axis-title {
+  fill: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+.series-line {
+  fill: none;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.series-fill {
+  stroke: none;
+}
+
+/* Hit rates. A bar, not a chart, because a hit rate converges: plotting it draws a
+   picture of the sampling interval rather than of the cache. */
+/* Same reasoning as .chart-pair: these are small, so the floor can be lower. */
+.rate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px 14px;
+  margin: 8px 0 4px;
+}
+
+/* min-width: 0 so the mono readout in the head can shrink rather than pushing
+   the grid column wider than its share. */
+.rate {
+  min-width: 0;
+}
+
+.rate-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.rate-value {
+  color: var(--vscode-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rate-track {
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--vscode-sideBar-bg);
+}
+
+.rate-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--chart-share);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* The toolchain-boundary list. A grid of bordered cells, the way VSCode draws a
+   settings section rather than as a row of tinted cards. */
+.config-grid {
+  display: grid;
+  margin: 18px 0;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.config-grid div {
+  padding: 10px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-panel-bg);
+}
+
+.config-grid dt {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.config-grid dd {
+  margin: 4px 0 0;
+  color: var(--vscode-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* The two help affordances a config-grid row carries: the marker that opens the longer
+   explanation beside a label, and the qualifier under the figure. */
+.config-grid abbr {
+  margin-left: 4px;
+  color: var(--vscode-textLink-foreground);
+  cursor: help;
+  text-decoration: none;
+}
+
+.config-grid dd small {
+  display: block;
+  margin-top: 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+/* The rejection message ToolchainBoundaries renders under the status. On screen
+   rather than in a tooltip because the list's job is letting a learner match the
+   error on their screen to a row. Wrapped anywhere because the messages contain
+   <angle.h> names with no space to break on. */
+.config-grid dd code.boundary-message {
+  display: block;
+  margin-top: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The LDS tab. */
+.lds-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.lds-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+}
+
+.lds-approximate {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+/* The approximate-parts and stats notes are direct children of .lds-panel, which is a
+   flex column. A flex container does not collapse margins, so the UA's margin: 1em 0
+   would stack on top of the panel's own gap. Scoped to the flex children, since
+   these classes are also rendered inside .lds-detail where the margins apply. */
+.lds-panel > p {
+  margin: 0;
+}
+
+.lds-rep-note {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+.lds-clean {
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-editorSuccess-foreground);
+  color: var(--vscode-editorSuccess-foreground);
+  background: var(--vscode-editorWidget-bg);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.lds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The access list. A VSCode quick-open row: a list item on the sidebar colour,
+   selected with the list selection token rather than by colouring the border. */
+.lds-row {
+  display: grid;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  align-items: center;
+  grid-template-columns: 44px minmax(120px, 1fr) 110px 90px 60px;
+  gap: 10px;
+  background: var(--vscode-panel-bg);
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lds-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.lds-row.active {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.lds-row-degree {
+  padding: 2px 0;
+  color: var(--vscode-editor-bg);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: center;
+}
+
+.lds-row-name,
+.lds-row-stride,
+.lds-row-pc,
+.lds-row-count {
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lds-row-name {
+  color: inherit;
+}
+
+.lds-row-pc,
+.lds-row-count {
+  text-align: right;
+}
+
+.lds-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.lds-detail .section-title {
+  margin-bottom: 2px;
+}
+
+.lds-verdict {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lds-access,
+.lds-degree,
+.lds-flag {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.lds-access {
+  color: var(--vscode-descriptionForeground);
+}
+
+.lds-flag {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.lds-bankmap {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.lds-bankmap .lds-bank,
+.lds-bankmap .lds-phase-segment {
+  cursor: crosshair;
+}
+
+.lds-bank-label {
+  fill: var(--vscode-descriptionForeground);
+  font-family: var(--font-mono);
+  font-size: 7px;
+}
+
+/* The distinct-address count written above a conflicted column, so the depth is a
+   number the reader can read rather than only a relative height. */
+.lds-bank-count {
+  fill: var(--vscode-editorError-foreground);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.lds-axis-label {
+  fill: var(--vscode-editorLineNumber-foreground);
+  font-size: 7px;
+}
+
+.lds-phase-segment {
+  cursor: crosshair;
+}
+
+.lds-lanes {
+  width: auto;
+}
+
+.lds-lanes td,
+.lds-lanes th {
+  padding: 3px 9px;
+  text-align: right;
+}
+
+.lds-lanes td:last-child,
+.lds-lanes th:last-child {
+  text-align: left;
+}
+
+.lds-crowded-row {
+  color: var(--vscode-editorError-foreground);
+}
+
+.about-view {
+  max-width: 680px;
+}
+
+.about-view > p {
+  max-width: 590px;
+  margin-top: 12px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* The About tab's toolchain-boundary list. It sits under the device config rather than
+   beside it: mixing them invites reading a boundary as a property of the device. */
+.about-subhead {
+  margin: 18px 0 8px;
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.45; }
+}
+
+@media (max-width: 1000px) {
+  html,
+  body,
+  #root {
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100%;
+    height: auto;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  /* The panes are stacked here, so there is nothing between them to resize. Hidden
+     rather than merely unstyled: a display:none grid item is not placed. */
+  .pane-divider {
+    display: none;
+  }
+
+  .editor-pane {
+    height: 62vh;
+    min-height: 460px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+  }
+
+  .output-pane {
+    height: 70vh;
+    min-height: 500px;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header,
+  .editor-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .editor-toolbar {
+    width: 100%;
+  }
+
+  .editor-toolbar .example-select,
+  .editor-toolbar .example-select select {
+    width: 100%;
+  }
+
+  .editor-toolbar .run-actions,
+  .button {
+    width: 100%;
+  }
+
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lds-row {
+    grid-template-columns: 40px 1fr 60px;
+  }
+
+  .lds-row-stride,
+  .lds-row-pc {
+    display: none;
+  }
+}

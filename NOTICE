@@ -1,0 +1,39 @@
+# Third-Party Material Notice
+
+## Toolchain build
+
+The toolchain cross-builds an LLVM/Clang driver to WebAssembly and runs it on
+Wasmer. It uses these upstream projects:
+
+- [wasmerio/wasmer](https://github.com/wasmerio/wasmer), MIT licensed (Copyright (c) 2019-present Wasmer, Inc.), documents the WASIX compile, shared-memory, thread, TLS, and signal ABI and provides the runtime that executes the driver.
+- [wasix-org/wasix-libc](https://github.com/wasix-org/wasix-libc) supplies the WASIX sysroot under MIT, Apache-2.0, and Apache-2.0-LLVM.
+- [WebAssembly/wasi-sdk](https://github.com/WebAssembly/wasi-sdk) 25.0 supplies the wasm cross-compiler under Apache-2.0 WITH LLVM-exception.
+- [llvm/llvm-project](https://github.com/llvm/llvm-project) `llvmorg-19.1.6` supplies LLVM and Clang under Apache-2.0 WITH LLVM-exception.
+
+`toolchain/src/scripts/wasix_toolchain.cmake` is this repository's own implementation of the publicly documented WASIX flag set. `toolchain/src/patches/wasix-compat.patch` modifies files in the pinned LLVM source to support this cross-build; those modified LLVM files remain under LLVM's Apache-2.0 WITH LLVM-exception license.
+
+## Simulator
+
+`simulator` builds against two upstream simulators, wired in through `replace` directives in `go.mod` and pinned in `pins.env`:
+
+- [sarchlab/akita](https://github.com/sarchlab/akita) v5, MIT licensed (Copyright (c) 2017 Yifan Sun), provides the discrete-event simulation framework.
+- [sarchlab/mgpusim](https://github.com/sarchlab/mgpusim) v5, MIT licensed (Copyright (c) 2017 Project Akita Authors), provides the GPU timing model, instruction decoder, and wave execution.
+
+`simulator/third_party/akita_patches/` records this repository's local changes to akita, which add `js/wasm` build support. Those modified akita files remain under akita's MIT license.
+
+`simulator/third_party/mgpusim_patches/` records this repository's local changes to mgpusim, which add a GCN3 LDS bank-conflict analyzer. Those modified and added mgpusim files remain under mgpusim's MIT license.
+
+## Go modules
+
+- [open-telemetry/opentelemetry-proto-go](https://github.com/open-telemetry/opentelemetry-proto-go) via `go.opentelemetry.io/proto/otlp`, Apache-2.0, supplies the OTLP metrics and traces protobuf definitions.
+- [protocolbuffers/protobuf-go](https://github.com/protocolbuffers/protobuf-go) via `google.golang.org/protobuf`, BSD-3-Clause (Copyright (c) 2018 The Go Authors), is its runtime.
+
+The remaining indirect Go dependencies are pulled in by akita and mgpusim and retain their upstream licenses.
+
+## Website
+
+- [facebook/react](https://github.com/facebook/react) and `react-dom`, MIT, provide the UI.
+- [microsoft/monaco-editor](https://github.com/microsoft/monaco-editor), MIT, provides the CUDA source editor.
+- [wasmerio/wasmer](https://github.com/wasmerio/wasmer) via `@wasmer/sdk` 0.16.0, Modified MIT (Copyright (c) 2026 Wasmer, Inc.), runs the WASIX compiler driver in the browser.
+- [vitejs/vite](https://github.com/vitejs/vite), MIT, [privatenumber/tsx](https://github.com/privatenumber/tsx), MIT, and [evanw/esbuild](https://github.com/evanw/esbuild), MIT, provide the build and test tooling.
+- [microsoft/TypeScript](https://github.com/microsoft/TypeScript), Apache-2.0, provides the compiler and type definitions.

@@ -1,0 +1,61 @@
+# WASIX cross-build compatibility patch for llvmorg-19.1.6.
+#
+# This patch is an independent modification of LLVM's own CMake files. LLVM is
+# licensed under Apache-2.0 WITH LLVM-exception. The patch makes three changes:
+#  1. CheckAtomic.cmake treats both atomic probes as available because the
+#     generated wasm test executables cannot be run by CMake during this
+#     cross-compilation.
+#  2. clang/tools/CMakeLists.txt excludes c-index-test because that host-only
+#     tool is not buildable for the wasm driver.
+#  3. clang/test/CMakeLists.txt drops c-index-test from CLANG_TEST_DEPS. Without
+#     this, change 2 leaves a dangling dependency: add_lit_testsuite calls
+#     add_dependencies against a target that change 2 no longer creates, and
+#     CMake fails at configure time.
+
+diff --git a/clang/test/CMakeLists.txt b/clang/test/CMakeLists.txt
+index 299a35723..0a39f2c56 100644
+--- a/clang/test/CMakeLists.txt
++++ b/clang/test/CMakeLists.txt
+@@ -64,7 +64,6 @@ endif ()
+ 
+ list(APPEND CLANG_TEST_DEPS
+   apinotes-test
+-  c-index-test
+   clang
+   clang-fuzzer-dictionary
+   clang-resource-headers
+diff --git a/clang/tools/CMakeLists.txt b/clang/tools/CMakeLists.txt
+index 4885afc15..13c593126 100644
+--- a/clang/tools/CMakeLists.txt
++++ b/clang/tools/CMakeLists.txt
+@@ -18,7 +18,7 @@ if(HAVE_CLANG_REPL_SUPPORT)
+   add_clang_subdirectory(clang-repl)
+ endif()
+ 
+-add_clang_subdirectory(c-index-test)
++#add_clang_subdirectory(c-index-test)
+ 
+ add_clang_subdirectory(clang-rename)
+ add_clang_subdirectory(clang-refactor)
+diff --git a/llvm/cmake/modules/CheckAtomic.cmake b/llvm/cmake/modules/CheckAtomic.cmake
+index f11cadf39..ad9604961 100644
+--- a/llvm/cmake/modules/CheckAtomic.cmake
++++ b/llvm/cmake/modules/CheckAtomic.cmake
+@@ -41,7 +41,7 @@ endfunction(check_working_cxx_atomics64)
+ 
+ 
+ # Check for (non-64-bit) atomic operations.
+-if(MSVC)
++if(MSVC OR True)
+   set(HAVE_CXX_ATOMICS_WITHOUT_LIB True)
+ elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL")
+   # First check if atomics work without the library.
+@@ -62,7 +62,7 @@ elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL")
+ endif()
+ 
+ # Check for 64 bit atomic operations.
+-if(MSVC)
++if(MSVC OR True)
+   set(HAVE_CXX_ATOMICS64_WITHOUT_LIB True)
+ elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL")
+   # First check if atomics work without the library.

@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "vectoradd",
+      "kernel": "vectorAdd",
+      "codeObject": "vectoradd.co",
+      "source": "vectoradd.cpp",
+      "uniformLaunch": {
+        "elements": 1024,
+        "grid": [1024, 1, 1],
+        "block": [64, 1, 1],
+        "pointerArgs": 3,
+        "u32Args": [1024],
+        "h2dBuffers": 2
+      }
+    },
+    {
+      "id": "saxpy",
+      "kernel": "saxpy",
+      "codeObject": "saxpy.co",
+      "source": null
+    },
+    {
+      "id": "griddim",
+      "kernel": "gridDimProbe",
+      "codeObject": "griddim.co",
+      "source": "griddim.cu",
+      "note": "gridDim/blockIdx/blockDim probe: no uniformLaunch recipe, because the kernel is indexed by work group rather than by work item and TestGridDimMatchesLaunchGeometry drives it at its own launch shapes. It exists because gridDim is not an SGPR on gfx803 -- clang lowers it to a load from the AAMDQ dispatch packet through the dispatch-pointer SGPR pair (s[4:5], offsets 12/16/20), so it only reads correctly if the COV5 kernel_code_properties dispatch-pointer bit is parsed. See harness/griddim_test.go."
+    },
+    {
+      "id": "ldsconflict",
+      "kernel": "ldsConflict",
+      "codeObject": "ldsconflict.co",
+      "source": "ldsconflict.cu",
+      "note": "Kernels on only threadIdx.x get no implicit COV5 hidden-argument block: the code object declares kernarg_segment_size: 28 rather than the 288 every other code object here has, so harness/packRawArgs emits no hidden block for it. It indexes the way vectoradd.cpp and every website example index, which keeps it on the layout the harness expects; at this launch shape blockIdx.x is 0 and blockDim.x is 64, so the index is threadIdx.x either way and the bank pattern is unaffected. `SIM_CODE_OBJECT=ldsconflict.co` runs it in isolation.",
+      "uniformLaunch": {
+        "elements": 64,
+        "grid": [64, 1, 1],
+        "block": [64, 1, 1],
+        "pointerArgs": 3,
+        "u32Args": [64],
+        "h2dBuffers": 2
+      }
+    }
+  ],
+  "examples": [
+    {
+      "id": "reduction",
+      "file": "reduction.cu",
+      "kernel": "reduceBlocks",
+      "title": "Shared-Memory Reduction",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 1,
+        "stdout": "sum = 8386560.000000\n"
+      }
+    },
+    {
+      "id": "reduceFinal",
+      "file": null,
+      "kernel": "reduceFinal",
+      "title": "Shared-Memory Reduction, Final Stage",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 1,
+        "stdout": "sum = 8386560.000000\n"
+      }
+    },
+    {
+      "id": "prefixsum",
+      "file": "prefixsum.cu",
+      "kernel": "blockScan",
+      "title": "Prefix Sum (Exclusive Scan)",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "scan[0] = 0.000000, scan[1] = 1.000000, scan[1023] = 523776.000000\n"
+      }
+    },
+    {
+      "id": "scanTotals",
+      "file": null,
+      "kernel": "scanTotals",
+      "title": "Prefix Sum, Tile-Offset Scan",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "scan[0] = 0.000000, scan[1] = 1.000000, scan[1023] = 523776.000000\n"
+      }
+    },
+    {
+      "id": "addOffsets",
+      "file": null,
+      "kernel": "addOffsets",
+      "title": "Prefix Sum, Apply Tile Offsets",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "scan[0] = 0.000000, scan[1] = 1.000000, scan[1023] = 523776.000000\n"
+      }
+    },
+    {
+      "id": "stream_compaction",
+      "file": "stream_compaction.cu",
+      "kernel": "countMatches",
+      "title": "Stream Compaction",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 1,
+        "stdout": "count = 64\ncompacted[0] = 0.000000, compacted[63] = 1008.000000\n"
+      }
+    },
+    {
+      "id": "scanCounts",
+      "file": null,
+      "kernel": "scanCounts",
+      "title": "Stream Compaction, Scan Block Counts",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 1,
+        "stdout": "count = 64\ncompacted[0] = 0.000000, compacted[63] = 1008.000000\n"
+      }
+    },
+    {
+      "id": "compact",
+      "file": null,
+      "kernel": "compact",
+      "title": "Stream Compaction, Write Survivors",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 1,
+        "stdout": "count = 64\ncompacted[0] = 0.000000, compacted[63] = 1008.000000\n"
+      }
+    },
+    {
+      "id": "histogram",
+      "file": "histogram.cu",
+      "kernel": "histogram",
+      "title": "Histogram, Atomics-Free",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "bins = 256, all == 1: yes\n"
+      }
+    },
+    {
+      "id": "topk-rank",
+      "file": "topk-rank.cu",
+      "kernel": "topkRank",
+      "title": "Top-k by Rank",
+      "expect": {
+        "mallocCount": 2,
+        "h2dCount": 1,
+        "stdout": "rank  top[0] = 255, top[7] = 248\n"
+      }
+    },
+    {
+      "id": "topk-bisect",
+      "file": "topk-bisect.cu",
+      "kernel": "topkBisect",
+      "title": "Top-k by Bisection",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "bisect  top[0] = 255, top[7] = 248\n"
+      }
+    },
+    {
+      "id": "radixsort",
+      "file": "radixsort.cu",
+      "kernel": "radixSort",
+      "title": "Radix Sort, LSD",
+      "expect": {
+        "mallocCount": 1,
+        "h2dCount": 1,
+        "stdout": "first = 0, last = 255, ordered = 1\n"
+      }
+    },
+    {
+      "id": "bitonicsort",
+      "file": "bitonicsort.cu",
+      "kernel": "bitonicSort",
+      "title": "Bitonic Sort",
+      "expect": {
+        "mallocCount": 2,
+        "h2dCount": 1,
+        "stdout": "sorted[0] = 0.000000, sorted[128] = 128.000000, sorted[255] = 255.000000\nordered = 1\n"
+      }
+    },
+    {
+      "id": "matmul-naive",
+      "file": "matmul-naive.cu",
+      "kernel": "matmulNaive",
+      "title": "Matrix Multiply, Naive",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 2,
+        "stdout": "c[0] = 256.000000, c[16383] = 256.000000\n"
+      }
+    },
+    {
+      "id": "matmul-tiled",
+      "file": "matmul-tiled.cu",
+      "kernel": "matmulTiled",
+      "title": "Matrix Multiply, Tiled",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 2,
+        "stdout": "c[0] = 256.000000, c[16383] = 256.000000\n"
+      }
+    },
+    {
+      "id": "matmul-conflict",
+      "file": "matmul-conflict.cu",
+      "kernel": "matmulConflict",
+      "title": "Matrix Multiply, Row Stride 32",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 2,
+        "stdout": "c[0] = 256.000000, c[16383] = 256.000000\n"
+      }
+    },
+    {
+      "id": "matmul-padded",
+      "file": "matmul-padded.cu",
+      "kernel": "matmulPadded",
+      "title": "Matrix Multiply, Row Stride 34",
+      "expect": {
+        "mallocCount": 3,
+        "h2dCount": 2,
+        "stdout": "c[0] = 256.000000, c[16383] = 256.000000\n"
+      }
+    }
+  ]
+}

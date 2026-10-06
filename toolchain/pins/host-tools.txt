@@ -1,0 +1,6 @@
+wasmer_cli=7.4.2
+wasmer_install=install the Wasmer 7.4.2 release and add its bin directory to PATH
+wasm_tools=1.259.0
+wasm_tools_install=cargo install wasm-tools --version 1.259.0 --locked
+wasm_opt=133
+wasm_opt_install=brew install binaryen; verify with wasm-opt --version

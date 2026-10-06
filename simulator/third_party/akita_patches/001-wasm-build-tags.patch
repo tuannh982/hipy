@@ -1,0 +1,269 @@
+diff --git a/daisen2/daisen2.go b/daisen2/daisen2.go
+index 2a5940b..4ef8581 100644
+--- a/daisen2/daisen2.go
++++ b/daisen2/daisen2.go
+@@ -1,4 +1,6 @@
+ // Package daisen2 provides a trace visualization server for Akita simulations.
++//go:build !js || !wasm
++
+ package daisen2
+ 
+ import "github.com/sarchlab/akita/v5/daisen2/internal/httpapi"
+diff --git a/daisen2/daisen2_js.go b/daisen2/daisen2_js.go
+new file mode 100644
+index 0000000..ac7398b
+--- /dev/null
++++ b/daisen2/daisen2_js.go
+@@ -0,0 +1,18 @@
++//go:build js && wasm
++
++package daisen2
++
++type ProgressBar struct {
++	ID         uint64
++	Name       string
++	Total      uint64
++	Finished   uint64
++	InProgress uint64
++}
++
++func (b *ProgressBar) IncrementInProgress(amount uint64) { b.InProgress += amount }
++func (b *ProgressBar) IncrementFinished(amount uint64)   { b.Finished += amount }
++func (b *ProgressBar) MoveInProgressToFinished(amount uint64) {
++	b.InProgress -= amount
++	b.Finished += amount
++}
+diff --git a/datarecording/datareader.go b/datarecording/datareader.go
+index 2f19009..22d96ee 100644
+--- a/datarecording/datareader.go
++++ b/datarecording/datareader.go
+@@ -1,3 +1,5 @@
++//go:build !js || !wasm
++
+ package datarecording
+ 
+ import (
+diff --git a/datarecording/datarecorder.go b/datarecording/datarecorder.go
+index 4101540..7295d7c 100644
+--- a/datarecording/datarecorder.go
++++ b/datarecording/datarecorder.go
+@@ -1,3 +1,5 @@
++//go:build !js || !wasm
++
+ package datarecording
+ 
+ import (
+diff --git a/datarecording/noop.go b/datarecording/noop.go
+new file mode 100644
+index 0000000..a6522db
+--- /dev/null
++++ b/datarecording/noop.go
+@@ -0,0 +1,9 @@
++package datarecording
++
++type NoopDataRecorder struct{}
++
++func (NoopDataRecorder) CreateTable(string, any) {}
++func (NoopDataRecorder) InsertData(string, any)  {}
++func (NoopDataRecorder) ListTables() []string    { return nil }
++func (NoopDataRecorder) Flush()                  {}
++func (NoopDataRecorder) Close() error            { return nil }
+diff --git a/datarecording/noop_js.go b/datarecording/noop_js.go
+new file mode 100644
+index 0000000..9cd6d5f
+--- /dev/null
++++ b/datarecording/noop_js.go
+@@ -0,0 +1,15 @@
++//go:build js && wasm
++
++package datarecording
++
++type DataRecorder interface {
++	CreateTable(tableName string, sampleEntry any)
++	InsertData(tableName string, entry any)
++	ListTables() []string
++	Flush()
++	Close() error
++}
++
++func NewDataRecorder(string) DataRecorder {
++	return NoopDataRecorder{}
++}
+diff --git a/mem/cache/writeback/builder.go b/mem/cache/writeback/builder.go
+index 92fe872..167463b 100644
+--- a/mem/cache/writeback/builder.go
++++ b/mem/cache/writeback/builder.go
+@@ -84,6 +84,23 @@ func (b Builder) Build(name string) *Comp {
+ 	blockSize := 1 << b.spec.Log2BlockSize
+ 	numSets := int(
+ 		b.spec.TotalByteSize / uint64(b.spec.WayAssociativity*blockSize))
++	// A cache too small for even ONE set is refused here rather than built.
++	//
++	// Every directory lookup computes its set as `hashedAddr % numSets`, so a zero
++	// set count does not fail at Build -- it panics with an integer divide by zero
++	// the first time the cache is touched, which is deep inside a simulation run
++	// and reads as a simulator bug rather than as the misconfiguration it is.
++	// Checked at the only point that still knows all three numbers involved.
++	//
++	// The message names the arithmetic rather than only the symptom, because the
++	// fix is a larger TotalByteSize and the caller needs to know by how much: one
++	// set needs WayAssociativity*blockSize bytes.
++	if numSets < 1 {
++		panic(fmt.Sprintf("writeback: %s: TotalByteSize %d is too small for %d-way %d-byte lines; "+
++			"one set needs %d bytes, so the cache needs at least that",
++			name, b.spec.TotalByteSize, b.spec.WayAssociativity, blockSize,
++			b.spec.WayAssociativity*blockSize))
++	}
+ 
+ 	spec := b.buildSpec(numSets)
+ 
+diff --git a/mem/cache/writethroughcache/builder.go b/mem/cache/writethroughcache/builder.go
+index b1358fa..9684819 100644
+--- a/mem/cache/writethroughcache/builder.go
++++ b/mem/cache/writethroughcache/builder.go
+@@ -94,6 +94,15 @@ func (b Builder) Build(name string) *Comp {
+ 	blockSize := 1 << spec.Log2BlockSize
+ 	spec.NumSets = int(spec.TotalByteSize /
+ 		uint64(spec.WayAssociativity*blockSize))
++	// A cache too small for even ONE set is refused here rather than built. See the
++	// note in the writeback builder: the failure would otherwise be an integer
++	// divide by zero on the first lookup, not a build error.
++	if spec.NumSets < 1 {
++		panic(fmt.Sprintf("writethroughcache: %s: TotalByteSize %d is too small for %d-way %d-byte lines; "+
++			"one set needs %d bytes, so the cache needs at least that",
++			name, spec.TotalByteSize, spec.WayAssociativity, blockSize,
++			spec.WayAssociativity*blockSize))
++	}
+ 
+ 	initialState := b.buildInitialState(name, spec, spec.NumSets, blockSize)
+ 
+diff --git a/monitoring2/monitor.go b/monitoring2/monitor.go
+index c5f2650..e5145c0 100644
+--- a/monitoring2/monitor.go
++++ b/monitoring2/monitor.go
+@@ -1,3 +1,5 @@
++//go:build !js || !wasm
++
+ package monitoring2
+ 
+ import (
+diff --git a/monitoring2/monitor_js.go b/monitoring2/monitor_js.go
+new file mode 100644
+index 0000000..d22d776
+--- /dev/null
++++ b/monitoring2/monitor_js.go
+@@ -0,0 +1,29 @@
++//go:build js && wasm
++
++package monitoring2
++
++import (
++	"github.com/sarchlab/akita/v5/daisen2"
++	"github.com/sarchlab/akita/v5/timing"
++	"github.com/sarchlab/akita/v5/tracing"
++)
++
++type Component interface {
++	Name() string
++}
++
++type Monitor struct{}
++
++func NewMonitor() *Monitor                             { return &Monitor{} }
++func (m *Monitor) WithPortNumber(int) *Monitor         { return m }
++func (m *Monitor) RegisterEngine(timing.Engine)        {}
++func (m *Monitor) RegisterComponent(Component)         {}
++func (m *Monitor) RegisterPort(any)                    {}
++func (m *Monitor) RegisterVisTracer(*tracing.DBTracer) {}
++func (m *Monitor) CreateProgressBar(string, uint64) *daisen2.ProgressBar {
++	return &daisen2.ProgressBar{}
++}
++func (m *Monitor) CompleteProgressBar(*daisen2.ProgressBar) {}
++func (m *Monitor) SetTraceDBPath(string)                    {}
++func (m *Monitor) StartServer()                             {}
++func (m *Monitor) StopServer()                              {}
+diff --git a/simulation/builder.go b/simulation/builder.go
+index 4b9a9cc..e889330 100644
+--- a/simulation/builder.go
++++ b/simulation/builder.go
+@@ -20,6 +20,7 @@ type Builder struct {
+ 	outputFileName    string
+ 	visTracingOnStart bool
+ 	recordSource      bool
++	dataRecording     bool
+ 	sourceFSes        map[string]fs.FS
+ }
+ 
+@@ -29,6 +30,7 @@ func MakeBuilder() Builder {
+ 		parallelEngine: false,
+ 		monitorOn:      true,
+ 		recordSource:   true,
++		dataRecording:  true,
+ 	}
+ }
+ 
+@@ -50,6 +52,11 @@ func (b Builder) WithOutputFileName(filename string) Builder {
+ 	return b
+ }
+ 
++func (b Builder) WithoutDataRecording() Builder {
++	b.dataRecording = false
++	return b
++}
++
+ // WithMonitorPort sets the port number for the monitoring server.
+ func (b Builder) WithMonitorPort(port int) Builder {
+ 	b.monitorPort = port
+@@ -104,10 +111,12 @@ func (b Builder) Build() *Simulation {
+ 	b.createDataRecorder(s)
+ 	b.createEngine(s)
+ 	b.createIDGenerator(s)
+-	b.createMetaRecorder(s)
+-	b.createSourceRecorder(s)
+-	b.createTopologyRecorder(s)
+-	b.createVisTracer(s)
++	if b.dataRecording {
++		b.createMetaRecorder(s)
++		b.createSourceRecorder(s)
++		b.createTopologyRecorder(s)
++		b.createVisTracer(s)
++	}
+ 	b.createServer(s)
+ 
+ 	return s
+@@ -148,6 +157,10 @@ func (b Builder) createSimulation() *Simulation {
+ }
+ 
+ func (b Builder) createDataRecorder(s *Simulation) {
++	if !b.dataRecording {
++		s.dataRecorder = datarecording.NoopDataRecorder{}
++		return
++	}
+ 	outputPath := b.outputFileName
+ 	if outputPath == "" {
+ 		outputPath = "akita_sim_" + s.id
+diff --git a/simulation/simulation.go b/simulation/simulation.go
+index 7cf0c60..18ec5eb 100644
+--- a/simulation/simulation.go
++++ b/simulation/simulation.go
+@@ -60,7 +60,10 @@ func (s *Simulation) GetMonitor() *monitoring2.Monitor {
+ }
+ 
+ // GetVisTracer returns the tracer used in the simulation.
+-func (s *Simulation) GetVisTracer() *tracing.DBTracer {
++func (s *Simulation) GetVisTracer() tracing.Tracer {
++	if s.visTracer == nil {
++		return nil
++	}
+ 	return s.visTracer
+ }
+ 
+@@ -103,7 +106,7 @@ func (s *Simulation) RegisterComponent(c naming.Named) {
+ 	s.components = append(s.components, c)
+ 	s.compNameIndex[compName] = len(s.components) - 1
+ 
+-	if hookable, ok := c.(tracing.NamedHookable); ok {
++	if hookable, ok := c.(tracing.NamedHookable); ok && s.visTracer != nil {
+ 		tracing.CollectTrace(hookable, s.visTracer)
+ 	}
+ 
