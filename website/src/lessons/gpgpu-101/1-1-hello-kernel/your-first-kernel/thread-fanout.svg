@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200" width="520" height="200" role="img" aria-label="One function fanned out into sixteen threads, each writing its own cell of an output array of sixteen">
+  <rect width="520" height="200" fill="#252526"/>
+  <text x="12" y="20" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#9d9d9d">ONE FUNCTION, 16 THREADS</text>
+  <rect x="128" y="34" width="264" height="30" rx="4" fill="none" stroke="#007acc"/>
+  <text x="260" y="54" text-anchor="middle" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#cccccc">__global__ void fill(float *out)</text>
+  <path d="M260 64 L260 84 M32 84 L488 84" stroke="#007acc" fill="none"/>
+  <path d="M32 84 L32 100 M64 84 L64 100 M96 84 L96 100 M128 84 L128 100 M160 84 L160 100 M192 84 L192 100 M224 84 L224 100 M256 84 L256 100 M288 84 L288 100 M320 84 L320 100 M352 84 L352 100 M384 84 L384 100 M416 84 L416 100 M448 84 L448 100 M480 84 L480 100" stroke="#007acc" fill="none"/>
+  <text x="416" y="80" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#9d9d9d">16 threads</text>
+  <g fill="#1e1e1e" stroke="#3c3c3c">
+    <rect x="16" y="100" width="28" height="24" rx="3"/>
+    <rect x="48" y="100" width="28" height="24" rx="3"/>
+    <rect x="80" y="100" width="28" height="24" rx="3"/>
+    <rect x="112" y="100" width="28" height="24" rx="3"/>
+    <rect x="144" y="100" width="28" height="24" rx="3"/>
+    <rect x="176" y="100" width="28" height="24" rx="3"/>
+    <rect x="208" y="100" width="28" height="24" rx="3"/>
+    <rect x="240" y="100" width="28" height="24" rx="3"/>
+    <rect x="272" y="100" width="28" height="24" rx="3"/>
+    <rect x="304" y="100" width="28" height="24" rx="3"/>
+    <rect x="336" y="100" width="28" height="24" rx="3"/>
+    <rect x="368" y="100" width="28" height="24" rx="3"/>
+    <rect x="400" y="100" width="28" height="24" rx="3"/>
+    <rect x="432" y="100" width="28" height="24" rx="3"/>
+    <rect x="464" y="100" width="28" height="24" rx="3"/>
+  </g>
+  <g font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#cccccc" text-anchor="middle">
+    <text x="30" y="116">42</text>
+    <text x="62" y="116">42</text>
+    <text x="94" y="116">42</text>
+    <text x="126" y="116">42</text>
+    <text x="158" y="116">42</text>
+    <text x="190" y="116">42</text>
+    <text x="222" y="116">42</text>
+    <text x="254" y="116">42</text>
+    <text x="286" y="116">42</text>
+    <text x="318" y="116">42</text>
+    <text x="350" y="116">42</text>
+    <text x="382" y="116">42</text>
+    <text x="414" y="116">42</text>
+    <text x="446" y="116">42</text>
+    <text x="478" y="116">42</text>
+  </g>
+  <text x="16" y="150" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#9d9d9d">output[16]</text>
+  <text x="16" y="186" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#9d9d9d">the loop you never wrote</text>
+  <text x="330" y="186" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#9d9d9d">one call, 16 values</text>
+</svg>

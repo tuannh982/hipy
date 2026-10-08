@@ -60,14 +60,26 @@ type LdsLane struct {
 	// Phase indexes Phases. It is -1 only for an active lane matching no phase's
 	// lane range, which a hand-built Analysis handed to ldsbank.Record could.
 	Phase int `json:"phase"`
+
+	// Addrs are this lane's LDS-relative byte offsets in access order -- one per
+	// address the opcode moves, never device addresses. Nil means not reported.
+	Addrs []uint32 `json:"addrs"`
 }
 
 // LdsPattern is one distinct access pattern, plus how often it ran.
 type LdsPattern struct {
-	PC     uint64 `json:"pc"`
+	// PC is an offset within the kernel's code, not a device address: stable
+	// across runs, and what indexes the code object's disassembly and line table.
+	PC uint64 `json:"pc"`
+
 	Name   string `json:"name"`
 	IsRead bool   `json:"isRead"`
 	Degree int    `json:"degree"`
+
+	// SourceFile and SourceLine are the line table's answer for PC. An empty
+	// file with line 0 means the code object carried no debug info.
+	SourceFile string `json:"sourceFile"`
+	SourceLine int    `json:"sourceLine"`
 
 	// Stride is the byte step between consecutive lanes in the first phase, the
 	// headline diagnostic because it is what the reader can change.

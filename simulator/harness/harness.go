@@ -211,6 +211,10 @@ type Harness struct {
 	ldsOnce sync.Once
 	lds     *ldsState
 
+	// The code object's DWARF line table, read once per ELF. See srcline.go.
+	sourceOnce sync.Once
+	source     sourceCache
+
 	// closeOnce runs Close's two-call shutdown at most once: a second
 	// Driver.Terminate has no goroutine left to receive it. See Close.
 	closeOnce sync.Once
@@ -375,6 +379,9 @@ func isCUName(name string) bool {
 func (h *Harness) LoadCodeObject(elfBytes []byte) {
 	h.elfBytes = elfBytes
 	h.codeObjects = map[string]*insts.KernelCodeObject{}
+	// The line table belongs to the bytes just replaced, so the cache starts fresh.
+	h.sourceOnce = sync.Once{}
+	h.source = sourceCache{}
 }
 
 // loadCodeObject loads (and caches) the named kernel from the stored ELF.

@@ -4,24 +4,15 @@ import { MIN_L1V_BYTES, MIN_L2_BYTES, MIN_MEMORY_BYTES, validateOverrides } from
 import type { SimOverrides } from "../lib/protocol";
 
 type CustomizePanelProps = {
-  /** The device these sizes apply to, or null before the catalog arrives. */
-  device: CatalogDevice | null;
-  /** The current overrides; an absent field means the device default. */
-  overrides: SimOverrides;
-  /** Per-field problems from the last save, keyed as SimOverrides is. */
-  errors: Record<string, string>;
-  /** True between posting a save and its answer. */
-  saving: boolean;
-  /** True while a run is in flight, which is when a save cannot be applied. */
-  runActive: boolean;
+    device: CatalogDevice | null;
+    overrides: SimOverrides;
+    errors: Record<string, string>;
+    saving: boolean;
+    runActive: boolean;
   onChange: (next: SimOverrides) => void;
   onSave: () => void;
 };
 
-/**
- * One editable size. Blank means "device default" rather than zero, because the
- * builders read a zero as a real zero-sized cache.
- */
 function SizeField({
   id,
   label,
@@ -34,29 +25,18 @@ function SizeField({
   name,
 }: {
   id: string;
-  /** The SimOverrides key this field writes, for looking up its error. */
-  name: keyof SimOverrides;
+    name: keyof SimOverrides;
   label: string;
   hint: string;
-  /**
-   * The smallest size the simulator can build. Enforced here as well as in the
-   * export, because a refusal the reader only sees after a compile is a worse answer
-   * than an input that will not take the value.
-   */
-  floorBytes: number;
-  /** This field's message from the last save attempt, if it had one. */
-  error?: string;
-  /** What the simulator reports for this device, or null when it has not been read. */
-  deviceValue: number | null;
+    floorBytes: number;
+    error?: string;
+    deviceValue: number | null;
   value: number | undefined;
   onChange: (next: number | undefined) => void;
 }) {
   const [text, setText] = useState(value === undefined ? "" : String(value));
 
-  // Re-sync when the override changes from outside (a reset button, or a device
-  // switch clearing the panel), but not on every keystroke: an effect that reformats
-  // as the user types makes a half-typed number jump.
-  useEffect(() => {
+        useEffect(() => {
     setText(value === undefined ? "" : String(value));
   }, [value]);
 
@@ -109,15 +89,6 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-/**
- * The Customize tab: the sizes the simulator builds its platform from.
- *
- * These reach the builders, not just the readouts, so a figure typed here is what
- * the next run is measured on.
- *
- * Everything on this tab is something the reader can CHANGE. What the toolchain
- * refuses to build is not that, which is why it lives on the About tab instead.
- */
 export function CustomizePanel({
   device,
   overrides,
@@ -128,10 +99,7 @@ export function CustomizePanel({
   onSave,
 }: CustomizePanelProps) {
   const hasMALL = (device?.memLevels ?? []).includes("MALL");
-  // Anything that would change what the next run is built from, as opposed to
-  // anything merely typed: two ways of writing the same size make the button
-  // meaningless when it is not.
-  const dirty = Object.values(overrides).some((v) => v !== undefined);
+        const dirty = Object.values(overrides).some((v) => v !== undefined);
   const problems = validateOverrides(overrides, device);
   const blocked = Object.keys(problems).length > 0;
 

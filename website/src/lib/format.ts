@@ -2,11 +2,6 @@ function finite(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-// The 1024 step and the unit table, split out so a caller that has a figure to
-// print but its own idea of the row's precision takes the scaling from here.
-//
-// A zero scales to {value: 0, unit: "B"} rather than to a NaN from log(0). What
-// that figure MEANS is the caller's call, not this step's.
 const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"];
 
 export function scaleBytes(value: number): { value: number; unit: string } {

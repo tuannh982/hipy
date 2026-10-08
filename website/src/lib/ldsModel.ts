@@ -1,35 +1,25 @@
-import type { LdsAnalysisData, LdsPatternData, LdsPhaseData, LdsStatsData } from "./protocol";
+import type { LdsAnalysisData, LdsLaneData, LdsPatternData, LdsPhaseData, LdsStatsData } from "./protocol";
 
-// The LDS is 32 banks of 4 bytes, one 128-byte row, so the bank map is always 32
-// columns wide however few banks a given access touches. It lives here rather than
-// in ldsView because normalize needs it to widen a phase's bankAddrs to the full
-// row. ldsView re-exports it.
 export const LDS_BANK_COUNT = 32;
 
-// lanes is never null here: a null from the wire is normalized to [] at the boundary,
-// so no caller of the model can be handed a null and crash on .length.
-//
-// bankAddrs is never short here and never null: it is widened to one entry per bank
-// at the same boundary, so bankAddrs[b] is safe to index for any bank in the row.
 export type LdsPhase = {
   firstLane: number;
   lastLane: number;
   lanes: number[];
   degree: number;
-  // bankAddrs[b] is how many distinct addresses bank b saw in this phase. It is not
-  // a lane count, and that is what makes it usable: lanes reaching one bank at one
-  // address are a broadcast that costs one cycle. The largest entry is the phase's
-  // degree.
-  bankAddrs: number[];
+          bankAddrs: number[];
 };
 
-// phase is an index into the pattern's phases, and it is -1 for an active lane that
-// matches no phase's lane range. A caller that wants the phase's degree must check
-// phase >= 0 first; there is no phase at that index.
-export type LdsLane = { lane: number; bank: number; phase: number };
+export type LdsLane = { lane: number; bank: number; phase: number; addrs: number[] };
 
 export type LdsPattern = {
+  // pc is an offset within the kernel's code, not a device address. See
+  // ldswire.LdsPattern.
   pc: number;
+  // The code object's DWARF line table's answer for pc, already resolved by the
+  // harness. Line 0 with an empty file means no line table was carried.
+  sourceFile: string;
+  sourceLine: number;
   name: string;
   isRead: boolean;
   degree: number;
@@ -67,19 +57,8 @@ const severityBands = [
 
 type SeverityBand = (typeof severityBands)[number];
 
-// The degree is the number the reader can act on, so the label is the degree and
-// nothing else: a band name that only restates it ("2-way (2-way)") is noise in
-// user-facing text. The conflict-free case is the one with no degree to print.
 const conflictFreeLabel = "No conflict";
 
-/**
- * A degree of 1 is conflict-free, so it grades as "none" rather than sharing a band
- * with a conflict, and the absent-attribute default -1 collides with no real degree.
- *
- * IMPORTANT FOR CALLERS: -1, 0 and 1 all return the identical {id, label, color}
- * triple. This cannot tell "no conflict" from "nothing measured", so anything needing
- * that distinction must branch on the raw degree.
- */
 export function ldsSeverity(degree: number): { id: string; label: string; color: string } {
   const d = Number.isFinite(degree) && degree > 0 ? Math.trunc(degree) : 1;
   let band: SeverityBand = severityBands[0];
@@ -89,14 +68,10 @@ export function ldsSeverity(degree: number): { id: string; label: string; color:
   return { id: band.id, label: d === 1 ? conflictFreeLabel : `${d}-way`, color: band.color };
 }
 
-/**
- * The per-bank distinct-address counts, widened to the full row of banks.
- *
- * A missing or short array is padded with zeros, so an access with lanes and no
- * counts degrades to a map with nothing in it rather than to a throw. That
- * degradation is a real loss of information and the panel says so. An entry that is
- * not a finite non-negative integer is treated the same way.
- */
+export function ldsSeverityBands(): { id: string; color: string; from: number }[] {
+  return severityBands.map((band) => ({ id: band.id, color: band.color, from: band.min }));
+}
+
 function normalizeBankAddrs(raw: Partial<LdsPhaseData>): number[] {
   const out = new Array<number>(LDS_BANK_COUNT).fill(0);
   if (!Array.isArray(raw.bankAddrs)) return out;
@@ -107,9 +82,12 @@ function normalizeBankAddrs(raw: Partial<LdsPhaseData>): number[] {
   return out;
 }
 
-// phases[].lanes is the one nested array the wire can send as null (a phase whose
-// whole lane range is inactive is never appended to by the analyzer, so Go marshals
-// a nil slice as null). Normalized here, at the boundary.
+// An LDS byte offset is a whole non-negative number; anything else is a malformed body.
+// Unlike sourceLine, not truncated, since a fractional LINE has a real line it aimed at.
+function isOffset(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && Math.trunc(value) === value;
+}
+
 function normalizePhase(raw: Partial<LdsPhaseData>): LdsPhase {
   return {
     firstLane: raw.firstLane ?? 0,
@@ -120,9 +98,26 @@ function normalizePhase(raw: Partial<LdsPhaseData>): LdsPhase {
   };
 }
 
+// A non-array becomes [], which the UI reports as "not reported".
+function normalizeLane(raw: Partial<LdsLaneData>): LdsLane {
+  const addrs = Array.isArray(raw.addrs) ? raw.addrs.filter(isOffset) : [];
+  return {
+    lane: raw.lane ?? -1,
+    bank: raw.bank ?? -1,
+    phase: raw.phase ?? -1,
+    addrs,
+  };
+}
+
 function normalize(raw: Partial<LdsPatternData>): LdsPattern {
   return {
     pc: raw.pc ?? 0,
+    // Both a body predating the fields and a code object compiled without a line table
+    // arrive as the same "nothing was mapped" pair. hasSource is the only way to ask.
+    sourceFile: typeof raw.sourceFile === "string" ? raw.sourceFile : "",
+    sourceLine: typeof raw.sourceLine === "number" && Number.isFinite(raw.sourceLine) && raw.sourceLine > 0
+      ? Math.trunc(raw.sourceLine)
+      : 0,
     name: raw.name ?? "",
     isRead: raw.isRead ?? false,
     degree: raw.degree ?? 1,
@@ -132,7 +127,8 @@ function normalize(raw: Partial<LdsPatternData>): LdsPattern {
     addressGranularityApproximate: raw.addressGranularityApproximate ?? false,
     repIsFirstSeen: raw.repIsFirstSeen ?? true,
     phases: Array.isArray(raw.phases) ? raw.phases.map(normalizePhase) : [],
-    lanes: Array.isArray(raw.lanes) ? raw.lanes : [],
+    // Normalized per lane, so one malformed lane does not cost the other 63 their addresses.
+    lanes: Array.isArray(raw.lanes) ? raw.lanes.map(normalizeLane) : [],
     count: raw.count ?? 0,
     instancesTruncated: raw.instancesTruncated ?? false,
   };
@@ -146,12 +142,6 @@ function normalizeStats(raw: Partial<LdsStatsData> | undefined): LdsStats {
   };
 }
 
-/**
- * targetArch is the arch the kernel was compiled for, which is what the caveats are
- * about. An argument rather than a module-level read so this selector stays pure and
- * no caller can be handed a caveat naming a device it is not running on. Nullable,
- * passed through rather than papered over: it is null until the catalog answers.
- */
 export function selectLdsModel(data: LdsAnalysisData | null, targetArch: string | null): LdsModel | null {
   if (!data || !Array.isArray(data.patterns) || data.patterns.length === 0) return null;
 
@@ -159,10 +149,7 @@ export function selectLdsModel(data: LdsAnalysisData | null, targetArch: string 
     .map(normalize)
     .sort((left, right) => (right.degree - left.degree) || (right.count - left.count));
 
-  // An absent or blank arch renders as prose rather than as "unconfirmed for
-  // undefined" or "unconfirmed for .": a caveat that names no arch is still a true
-  // caveat.
-  const arch = typeof targetArch === "string" ? targetArch.trim() : "";
+        const arch = typeof targetArch === "string" ? targetArch.trim() : "";
 
   const approximate: string[] = [];
   if (patterns.some((p) => p.phaseModelApproximate)) {
@@ -184,4 +171,3 @@ export function selectLdsModel(data: LdsAnalysisData | null, targetArch: string 
     stats: normalizeStats(data.stats),
   };
 }
-

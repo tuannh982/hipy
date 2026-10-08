@@ -10,7 +10,6 @@
     "prepare-assets": "node --import tsx scripts/prepare-assets.mjs",
     "prepare-wasm": "node scripts/prepare-wasm.mjs",
     "compile-smoke": "node --import tsx scripts/compile-pipeline-smoke.mjs",
-    "class-audit": "node scripts/class-audit.mjs",
     "pretest": "npm run prepare-wasm",
     "test": "node --import tsx --test tests/*.test.mjs",
     "test:toolchain": "node --import tsx --test tests/toolchain.test.mjs",
@@ -27,9 +26,16 @@
     "d3-array": "3.2.4",
     "d3-scale": "4.0.2",
     "d3-shape": "3.2.0",
+    "katex": "^0.19.0",
+    "mermaid": "^11.17.2",
     "monaco-editor": "0.57.0",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.4",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/d3-array": "3.2.2",

@@ -13,9 +13,6 @@ type Archive = {
   uncompressedSize?: number;
 };
 
-// One toolchain's staged assets. There is one of these per row of
-// toolchain/toolchains.json, and the driver is what that toolchain runs the device
-// pass with.
 type ToolchainAssets = {
   id: string;
   driver: string;
@@ -32,15 +29,6 @@ type Manifest = {
 
 const CACHE_NAME = "hipy-toolchain-v3";
 
-// The driver, archive and manifest URLs are build-time constants, injected by
-// vite.config.ts from VITE_BASE_PATH and VITE_DRIVER_ENCODING through
-// toolchain-paths.ts. They are deliberately not spelled out here: loadOne rejects a
-// manifest whose driver and archive URLs are not exactly the constants for that
-// toolchain id.
-//
-// Read inside a function rather than at module scope because the Node test suite
-// imports this module directly to reach expandToolchainArchive, and Vite's `define`
-// substitution only happens in a real build.
 function toolchainUrls(): { driverUrls: Readonly<Record<string, string>>; archiveUrls: Readonly<Record<string, string>>; manifest: string } {
   if (typeof __HIPY_TOOLCHAIN_DRIVER_URLS__ !== "object" || typeof __HIPY_TOOLCHAIN_ARCHIVE_URLS__ !== "object" || typeof __HIPY_TOOLCHAIN_MANIFEST_URL__ !== "string") {
     throw new Error("toolchain URLs are build-time constants; call this through a Vite build");
@@ -61,10 +49,7 @@ async function loadOne(
   archiveUrls: Readonly<Record<string, string>>,
   onProgress: (progress: DownloadProgress) => void,
 ): Promise<{ driver: Uint8Array; files: Record<string, Uint8Array>; total: number }> {
-  // Checked against the constant before the fetch: a manifest naming a different URL
-  // is a staging bug, and reporting it after a ~14 MB download wastes the
-  // learner's time to learn the same thing.
-  if (entry.driver !== driverUrl) throw new Error(`toolchain manifest driver mismatch for ${entry.id}`);
+        if (entry.driver !== driverUrl) throw new Error(`toolchain manifest driver mismatch for ${entry.id}`);
   const total = entry.driverSize + entry.archives.reduce((sum, archive) => sum + archive.size, 0);
   const driverResponse = await fetchWithCache(cache, entry.driver);
   const driver = await readResponse(driverResponse, entry.driverSize, (value) => onProgress({ loaded: value, total }));
@@ -85,13 +70,6 @@ async function loadOne(
   return { driver, files, total };
 }
 
-/**
- * Load the staged assets for ONE toolchain, the one a device named.
- *
- * Only that toolchain's driver and archive are fetched even when the manifest lists
- * several: the others are for devices this run will not execute, and a second
- * driver is tens of megabytes.
- */
 export async function loadToolchainAssets(toolchainId: string, onProgress: (progress: DownloadProgress) => void): Promise<{ driver: Uint8Array; files: Record<string, Uint8Array> }> {
   const { driverUrls, archiveUrls, manifest: MANIFEST_URL } = toolchainUrls();
   const driverUrl = driverUrls[toolchainId];

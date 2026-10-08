@@ -178,16 +178,16 @@ func (h *Harness) DashboardSchema() DashboardSchema {
 	for _, level := range levels {
 		rows = append(rows, HierarchyRow{
 			Label:     level,
-			ReadPath:  fmt.Sprintf("memLevels.%s.readSinceLaunchBytes", level),
-			WritePath: fmt.Sprintf("memLevels.%s.writeSinceLaunchBytes", level),
+			ReadPath:  fmt.Sprintf("memLevels.%s.readBytes", level),
+			WritePath: fmt.Sprintf("memLevels.%s.writeBytes", level),
 		})
 	}
 	// DRAM is appended rather than being one of the levels above, because it is
 	// the one level measured by its own tracers and present on every device.
 	rows = append(rows, HierarchyRow{
 		Label:     "DRAM",
-		ReadPath:  "dramReadSinceLaunchBytes",
-		WritePath: "dramWriteSinceLaunchBytes",
+		ReadPath:  "dramReadBytes",
+		WritePath: "dramWriteBytes",
 	})
 
 	entries := make([]MeterEntry, 0, len(h.cacheLabels())+1)
@@ -205,7 +205,7 @@ func (h *Harness) DashboardSchema() DashboardSchema {
 		Badge:          "{elapsedSinceLaunchPs:duration} since launch",
 		Hierarchy: HierarchySchema{
 			Eyebrow: "Memory hierarchy",
-			Note:    "request bytes since launch, per level",
+			Note:    "request bytes to date, per level",
 			Rows:    rows,
 		},
 		Charts: charts,
@@ -215,10 +215,7 @@ func (h *Harness) DashboardSchema() DashboardSchema {
 			Note:    "A rate here is the ratio of two counters so far, so it converges rather than fluctuates",
 			Entries: entries,
 		},
-		// Since-launch, like every other figure here. The absolute pair carries the
-		// copies and memsets ahead of the launch, which are DRAM writes the kernel
-		// never issued, so the footer would disagree with the strip and the chart.
-		Footer: "{dramReadSinceLaunchBytes:bytes} read and {dramWriteSinceLaunchBytes:bytes} written " +
+		Footer: "{dramReadBytes:bytes} read and {dramWriteBytes:bytes} written " +
 			"over {instructions:count} instructions in {waves:count} wavefronts.",
 	}
 }

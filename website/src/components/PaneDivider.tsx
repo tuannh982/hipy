@@ -1,129 +1,156 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
-// The divider between the editor and the output panel, and the only way the width
-// of the editor is changed.
-//
-// It moves a CSS custom property on the workspace rather than writing a track size
-// itself, so the narrow-viewport rules still work: they set `grid-template-columns`
-// to a single column and hide this element, and an inline value from here would
-// outrank both.
-//
-// The width is in pixels rather than a ratio so a stored width from a wide window
-// can survive a narrow one; the clamp below is the only place that can notice.
+export type PaneOrientation = "vertical" | "horizontal";
 
-const storageKey = "hipy:editor-width:v1";
+const editorWidthKey = "hipy:editor-width:v1";
 
-// Narrower than this and the source is unreadable, so the drag stops rather than
-// letting the output panel vanish.
+export function editorWidthStorageKey(): string {
+  return editorWidthKey;
+}
+
+// Narrower than this and the source is unreadable, so a drag stops rather than
+// letting the far pane vanish.
 const minimumWidth = 280;
 // The output pane's own floor, from .workspace's grid rule.
 const outputMinimum = 380;
-// The divider's own track, likewise from the grid rule.
+// Shorter than this and the editor is a letterbox; the toolbar and footer alone
+// would be most of it.
+const minimumHeight = 160;
+// The tab strip plus some console, below which the output pane cannot be read.
+const outputMinimumHeight = 140;
+// The divider's own track, likewise from the grid rules.
 const dividerWidth = 6;
 const arrowStep = 24;
 const shiftStep = 96;
 
-/**
- * The editor width for a workspace of `available` pixels.
- *
- * Clamped at both ends, and the two ends are different kinds of bound: a floor on
- * the editor, and whatever is left once the output pane has had its own floor. An
- * `available` too small to satisfy both resolves to the minimum, because the output
- * pane can scroll and Monaco cannot.
- */
 export function clampEditorWidth(available: number, requested: number): number {
   if (!Number.isFinite(requested)) return minimumWidth;
   const maximum = Math.max(minimumWidth, available - outputMinimum - dividerWidth);
   return Math.round(Math.min(Math.max(requested, minimumWidth), maximum));
 }
 
-// A width persisted by an earlier visit, or null for "the CSS default". Null means
+export function clampEditorHeight(available: number, requested: number): number {
+  if (!Number.isFinite(requested)) return minimumHeight;
+  const maximum = Math.max(minimumHeight, available - outputMinimumHeight - dividerWidth);
+  return Math.round(Math.min(Math.max(requested, minimumHeight), maximum));
+}
+
+function clampFor(orientation: PaneOrientation, available: number, requested: number): number {
+  return orientation === "vertical"
+    ? clampEditorWidth(available, requested)
+    : clampEditorHeight(available, requested);
+}
+
+function minimumFor(orientation: PaneOrientation): number {
+  return orientation === "vertical" ? minimumWidth : minimumHeight;
+}
+
+function reservedFor(orientation: PaneOrientation): number {
+  return orientation === "vertical" ? outputMinimum : outputMinimumHeight;
+}
+
+// A size persisted by an earlier visit, or null for "the CSS default". Null means
 // nothing has been dragged yet, and the grid keeps its own ratio until something is.
-export function storedEditorWidth(): number | null {
+export function storedPaneSize(key: string): number | null {
   try {
-    const raw = window.localStorage.getItem(storageKey);
+    const raw = window.localStorage.getItem(key);
     if (raw === null) return null;
-    const width = Number.parseInt(raw, 10);
-    return Number.isFinite(width) ? width : null;
+    const size = Number.parseInt(raw, 10);
+    return Number.isFinite(size) ? size : null;
   } catch {
     return null;
   }
 }
 
-function rememberEditorWidth(width: number): void {
+export function rememberPaneSize(key: string, size: number): void {
   try {
-    window.localStorage.setItem(storageKey, String(width));
+    window.localStorage.setItem(key, String(size));
   } catch {
-    // A session that cannot persist the width still resizes; it just forgets.
+    // A session that cannot persist the size still resizes; it just forgets.
   }
+}
+
+export function storedEditorWidth(): number | null {
+  return storedPaneSize(editorWidthKey);
 }
 
 export function PaneDivider({
   container,
   value,
   onChange,
+  orientation = "vertical",
+  storageKey,
+  label,
 }: {
-  // The element the widths are measured against, as a ref rather than an element: a
-  // ref is current from the first commit, where a prop holding `ref.current` is
-  // not. Null on the ref means the workspace has unmounted.
-  container: RefObject<HTMLElement | null>;
+        container: RefObject<HTMLElement | null>;
   value: number | null;
-  onChange: (width: number) => void;
+  onChange: (size: number) => void;
+  orientation?: PaneOrientation;
+  // Each divider needs its own key. Two dividers sharing one would make the
+  // lesson pane's width and the editor's height overwrite each other.
+  storageKey?: string;
+  label?: string;
 }) {
   const [dragging, setDragging] = useState(false);
-  // The workspace's own width, tracked rather than read during render: the clamp
-  // below has to re-run when it does.
+  // The workspace's own extent along the drag axis, tracked rather than read during
+  // render: the clamp below has to re-run when it does.
   const [available, setAvailable] = useState(0);
-  // The pointer's starting position and the width it started from, so a move is read
+  // The pointer's starting position and the size it started from, so a move is read
   // as a delta from the drag rather than as an absolute position.
-  const originRef = useRef<{ x: number; width: number } | null>(null);
+  const originRef = useRef<{ at: number; size: number } | null>(null);
+
+  // The key defaults to the workspace divider's own, so a caller that does not name
+  // one keeps the historical behaviour exactly.
+  const key = storageKey ?? editorWidthKey;
+  const vertical = orientation === "vertical";
+  const minimum = minimumFor(orientation);
+  const reserved = reservedFor(orientation);
 
   useEffect(() => {
     const element = container.current;
     if (element === null) return;
-    const measure = (): void => setAvailable(element.getBoundingClientRect().width);
+    const measure = (): void => {
+      const box = element.getBoundingClientRect();
+      setAvailable(vertical ? box.width : box.height);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [container]);
+    // `vertical` is in the closure; a change of axis is a different divider, and
+    // React remounts it by key rather than re-running this against the new axis.
+  }, [container, vertical]);
 
-  const widthAt = useCallback(
-    (clientX: number): number => {
+  const sizeAt = useCallback(
+    (client: number): number => {
       const origin = originRef.current;
-      if (origin === null) return minimumWidth;
-      return clampEditorWidth(available, origin.width + (clientX - origin.x));
+      if (origin === null) return minimum;
+      return clampFor(orientation, available, origin.size + (client - origin.at));
     },
-    [available],
+    [available, minimum, orientation],
   );
 
   const move = useCallback(
-    (width: number): void => {
-      if (width === value) return;
-      rememberEditorWidth(width);
-      onChange(width);
+    (size: number): void => {
+      if (size === value) return;
+      rememberPaneSize(key, size);
+      onChange(size);
     },
-    [onChange, value],
+    [key, onChange, value],
   );
 
-  // A width persisted against a wider window is re-clamped here rather than on the
-  // next drag, or opening the playground on a laptop after resizing it on a monitor
-  // would push the output panel off screen. It writes through onChange and not
-  // through move(), so the clamped width is NOT persisted: the stored number is the
-  // reader's preference for a screen big enough to hold it.
-  useEffect(() => {
+            useEffect(() => {
     if (value === null || available === 0) return;
-    const clamped = clampEditorWidth(available, value);
+    const clamped = clampFor(orientation, available, value);
     if (clamped !== value) onChange(clamped);
-  }, [available, onChange, value]);
+  }, [available, onChange, orientation, value]);
 
   const begin = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (container.current === null) return;
-    // The width the drag starts from is the state value when there is one, and the
-    // rendered width of the editor pane when there is not -- which is the FIRST drag,
-    // since the grid is still on the CSS default.
-    const rendered = event.currentTarget.previousElementSibling?.getBoundingClientRect().width ?? minimumWidth;
-    originRef.current = { x: event.clientX, width: value ?? rendered };
+                const rendered =
+      event.currentTarget.previousElementSibling?.getBoundingClientRect()[vertical ? "width" : "height"] ??
+      minimum;
+    originRef.current = { at: vertical ? event.clientX : event.clientY, size: value ?? rendered };
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragging(true);
   };
@@ -138,33 +165,39 @@ export function PaneDivider({
 
   const nudge = (delta: number): void => {
     if (value === null) return;
-    move(clampEditorWidth(available, value + delta));
+    move(clampFor(orientation, available, value + delta));
   };
 
-  // A keyboard equivalent, because a divider only a pointer can move is a divider a
-  // keyboard cannot use. The steps are the same for both keys and differ only in
-  // size.
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "ArrowLeft") { nudge(-(event.shiftKey ? shiftStep : arrowStep)); event.preventDefault(); return; }
-    if (event.key === "ArrowRight") { nudge(event.shiftKey ? shiftStep : arrowStep); event.preventDefault(); }
+        const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const step = event.shiftKey ? shiftStep : arrowStep;
+    if (vertical) {
+      if (event.key === "ArrowLeft") { nudge(-step); event.preventDefault(); return; }
+      if (event.key === "ArrowRight") { nudge(step); event.preventDefault(); }
+      return;
+    }
+    if (event.key === "ArrowUp") { nudge(-step); event.preventDefault(); return; }
+    if (event.key === "ArrowDown") { nudge(step); event.preventDefault(); }
   };
 
   // The accessible bounds are the same two the clamp uses, so what a screen reader
   // announces is the range the drag actually allows.
-  const maximum = Math.max(minimumWidth, available - outputMinimum - dividerWidth);
+  const maximum = Math.max(minimum, available - reserved - dividerWidth);
 
   return (
     <div
-      className={`pane-divider${dragging ? " dragging" : ""}`}
+      className={`pane-divider ${vertical ? "vertical" : "horizontal"}${dragging ? " dragging" : ""}`}
       role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize the editor"
+      aria-orientation={orientation}
+      aria-label={label ?? (vertical ? "Resize the editor" : "Resize the editor height")}
       aria-valuenow={value ?? undefined}
-      aria-valuemin={minimumWidth}
+      aria-valuemin={minimum}
       aria-valuemax={maximum}
       tabIndex={0}
       onPointerDown={begin}
-      onPointerMove={(event) => { if (originRef.current === null) return; move(widthAt(event.clientX)); }}
+      onPointerMove={(event) => {
+        if (originRef.current === null) return;
+        move(sizeAt(vertical ? event.clientX : event.clientY));
+      }}
       onPointerUp={end}
       onPointerCancel={end}
       onKeyDown={onKeyDown}

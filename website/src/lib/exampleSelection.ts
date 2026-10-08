@@ -18,15 +18,6 @@ export function exampleIdFromGlobKey(globKey: string): string {
   return fileName.replace(/\.cu$/, "");
 }
 
-// The picker is the only menu a user ever sees, so the label has to carry the
-// lesson: deriving one from the id alone renders "Matmul Conflict" and "Matmul
-// Padded", two labels that never say what separates the kernels, which is the exact
-// distinction the derivation erased. The manifest's title carries it ("Matrix
-// Multiply, Row Stride 32"), beside the id and file it describes in
-// simulator/testdata/fixtures.json.
-//
-// A title is optional and the derivation stays as the fallback, so a blank one
-// still gets a label rather than an empty picker entry.
 export function exampleLabel(id: string, title?: string | null): string {
   const named = title?.trim();
   if (named) return named;
@@ -40,4 +31,40 @@ export function exampleLabel(id: string, title?: string | null): string {
 export function selectedExampleId(source: string, examples: readonly ExampleDefinition[]): string | null {
   const hash = contentHash(source);
   return examples.find((example) => example.source === source || (example.contentHash !== undefined && example.contentHash === hash))?.id ?? null;
+}
+
+// reduction leads the picker. See buildExamples, in the next task, for why.
+export const DEFAULT_EXAMPLE_ID = "reduction";
+
+export function defaultExampleSource(examples: readonly ExampleDefinition[]): string {
+  const fallback = examples.find((example) => example.id === DEFAULT_EXAMPLE_ID)?.source;
+  if (fallback === undefined) {
+    throw new Error(`default example ${DEFAULT_EXAMPLE_ID} is missing from src/examples`);
+  }
+  return fallback;
+}
+
+export type LabelledExample = ExampleDefinition & { label: string };
+
+export function buildExamples(
+  entries: readonly { path: string; source: string }[],
+  titles: ReadonlyMap<string, string>,
+): readonly LabelledExample[] {
+  return entries
+    .map(({ path, source }) => {
+      const id = exampleIdFromGlobKey(path);
+      return {
+        id,
+        label: exampleLabel(id, titles.get(id)),
+        source,
+        contentHash: contentHash(source),
+      };
+    })
+    .sort(byDefaultFirst);
+}
+
+function byDefaultFirst(left: LabelledExample, right: LabelledExample): number {
+  if (left.id === DEFAULT_EXAMPLE_ID) return -1;
+  if (right.id === DEFAULT_EXAMPLE_ID) return 1;
+  return left.id.localeCompare(right.id);
 }

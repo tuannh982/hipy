@@ -633,8 +633,10 @@ func TestLDSPatternJSONContract(t *testing.T) {
 		PhaseModelApproximate:         true,
 		AddressGranularityApproximate: true,
 		Phases:                        []LdsPhase{{FirstLane: 0, LastLane: 7, Lanes: []int{0, 1}, Degree: 4, BankAddrs: bankAddrFixture()}},
-		Lanes:                         []LdsLane{{Lane: 0, Bank: 0, Phase: 0}},
+		Lanes:                         []LdsLane{{Lane: 0, Bank: 0, Phase: 0, Addrs: []uint32{0x40, 0x80}}},
 		RepIsFirstSeen:                true,
+		SourceFile:                    "ldsconflict.cu",
+		SourceLine:                    52,
 		Count:                         200,
 		Instances:                     []uint64{7},
 		InstancesTruncated:            true,
@@ -651,6 +653,8 @@ func TestLDSPatternJSONContract(t *testing.T) {
 
 	want := map[string]any{
 		"pc":                            float64(0x4074),
+		"sourceFile":                    "ldsconflict.cu",
+		"sourceLine":                    float64(52),
 		"name":                          "ds_read_b128",
 		"isRead":                        true,
 		"degree":                        float64(4),
@@ -665,6 +669,7 @@ func TestLDSPatternJSONContract(t *testing.T) {
 		}},
 		"lanes": []any{map[string]any{
 			"lane": float64(0), "bank": float64(0), "phase": float64(0),
+			"addrs": []any{float64(0x40), float64(0x80)},
 		}},
 		"repIsFirstSeen":     true,
 		"count":              float64(200),
@@ -707,8 +712,13 @@ func TestLDSPatternJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal LdsLane: %v", err)
 	}
-	if string(lane) != `{"lane":0,"bank":0,"phase":0}` {
+	if string(lane) != `{"lane":0,"bank":0,"phase":0,"addrs":[64,128]}` {
 		t.Errorf("LdsLane JSON = %s", lane)
+	}
+	if empty, err := json.Marshal(LdsLane{Lane: 1, Bank: 0, Phase: 0}); err != nil {
+		t.Fatalf("marshal LdsLane with no addresses: %v", err)
+	} else if !strings.Contains(string(empty), `"addrs":null`) {
+		t.Errorf("a lane with no addresses marshals as %s, want an explicit null so a host can tell it from an offset of 0", empty)
 	}
 
 	// Stats keys too, since the report wrapper nests them.

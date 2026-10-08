@@ -1,12 +1,3 @@
-// The CUDA language: what the editor knows, and how it knows it.
-//
-// Monaco ships a `cpp` tokenizer, which is a syntax highlighter and nothing more.
-// So what follows is a C++-complete tokenizer plus the four things a language
-// service contributes that a highlighter cannot, each scoped to CUDA. Anything
-// needing a type checker or a preprocessor is not attempted: a wrong diagnostic
-// in an editor a learner trusts teaches them to ignore the squiggles.
-
-/** The tables, as data. Every provider below reads these, so there is one list. */
 
 export const CUDA_KEYWORDS = [
   // Address space and execution space qualifiers.
@@ -18,10 +9,7 @@ export const CUDA_KEYWORDS = [
   "__threadfence", "__threadfence_block", "__syncwarp", "__nanosleep",
   // Thread hierarchy.
   "threadIdx", "blockIdx", "blockDim", "gridDim", "warpSize", "warpIdx", "laneIdx",
-  // Math and utility intrinsics. The f-suffixed float forms lead because those are
-  // what a learner reaches for; the double forms are here so forgetting the suffix
-  // is catchable in completion.
-  "__fadd_rn", "__fmul_rn", "__fsub_rn", "__fdiv_rn", "__fmaf_rn",
+        "__fadd_rn", "__fmul_rn", "__fsub_rn", "__fdiv_rn", "__fmaf_rn",
   "atomicAdd", "atomicSub", "atomicMin", "atomicMax", "atomicExch", "atomicCAS",
   "atomicInc", "atomicDec", "atomicAnd", "atomicOr", "atomicXor",
   "atomicAdd_system", "atomicCAS_system",
@@ -43,28 +31,50 @@ export const CUDA_TYPES = [
   "int8_t", "int16_t", "int32_t", "int64_t",
   "uint8_t", "uint16_t", "uint32_t", "uint64_t",
   "float2", "float4", "double2", "int2", "int4", "uint2", "uint4",
-  "dim3", "cudaError_t", "cudaStream_t", "cudaEvent_t",
+  "dim3", "cudaError_t", "cudaStream_t", "cudaMemcpyKind",
 ] as const;
 
 export const CUDA_RUNTIME = [
   "cudaMalloc", "cudaMallocHost", "cudaMallocManaged", "cudaFree", "cudaHostAlloc",
-  "cudaMemcpy", "cudaMemcpyAsync", "cudaMemcpyHostToDevice", "cudaMemcpyDeviceToHost",
-  "cudaMemcpyDeviceToDevice", "cudaMemcpyHostToHost", "cudaMemset", "cudaMemsetAsync",
+  "cudaMemcpy", "cudaMemcpyAsync", "cudaMemset", "cudaMemsetAsync",
   "cudaMemGetInfo", "cudaDeviceSynchronize", "cudaStreamSynchronize",
   "cudaGetLastError", "cudaPeekAtLastError", "cudaGetErrorString", "cudaGetErrorName",
-  "cudaSuccess",
+  "cudaLaunchKernel",
 ] as const;
+
+export const CUDA_RUNTIME_IMPLEMENTED = [
+  "cudaMalloc", "cudaFree", "cudaMemcpy", "cudaMemset",
+  "cudaGetLastError", "cudaDeviceSynchronize",
+] as const;
+
+export const CUDA_MEMCPY_KINDS = [
+  "cudaMemcpyHostToHost", "cudaMemcpyHostToDevice", "cudaMemcpyDeviceToHost",
+  "cudaMemcpyDeviceToDevice", "cudaMemcpyDefault",
+] as const;
+
+export const CUDA_ERROR_CODES = [
+  "cudaErrorInvalidValue", "cudaErrorMemoryAllocation", "cudaErrorLaunchFailure",
+] as const;
+
+export const CUDA_RUNTIME_DECLARED_ONLY = ["cudaLaunchKernel"] as const;
+
+export function isCudaRuntimeImplemented(name: string): boolean {
+  return (CUDA_RUNTIME_IMPLEMENTED as readonly string[]).includes(name);
+}
+
+export function isCudaRuntimeUnimplemented(name: string): boolean {
+  if (!(CUDA_RUNTIME as readonly string[]).includes(name)) return false;
+  return !isCudaRuntimeImplemented(name) && !isCudaRuntimeDeclaredOnly(name);
+}
+
+export function isCudaRuntimeDeclaredOnly(name: string): boolean {
+  return (CUDA_RUNTIME_DECLARED_ONLY as readonly string[]).includes(name);
+}
 
 export const CUDA_BOUNDARIES = [
   "printf", "malloc", "free", "exit", "sqrt", "pow", "exp", "log", "sin", "cos",
 ] as const;
 
-/**
- * One-line documentation per intrinsic, shown on hover.
- *
- * Deliberately short: a hover that opens a wall of text does not get read. A symbol
- * absent from the table has no note, and hover says so rather than inventing one.
- */
 export const CUDA_DOCS: Readonly<Record<string, string>> = {
   __syncthreads: "Waits until every thread in the block has reached it. All __shared__ writes before it are visible after it.",
   __syncthreads_count: "Waits until `count` threads of the block have arrived, then releases them together.",
@@ -84,10 +94,34 @@ export const CUDA_DOCS: Readonly<Record<string, string>> = {
   blockDim: "The block's shape in threads. With a 1-D launch it is `.x` threads wide.",
   gridDim: "The grid's shape in blocks. One wave per 64 threads of a 1-D block.",
   cudaMalloc: "Allocates device memory and returns a device pointer the host must not dereference.",
-  cudaMemcpy: "Copies between host and device. Synchronous: the host blocks until it is done.",
+  cudaFree: "Releases a cudaMalloc allocation. Passing anything else is undefined, and the shim checks the pointer against what it handed out.",
+  cudaMemcpy: "Copies between host and device. Synchronous: the host blocks until it's done. The direction is the `kind` argument -- a cudaMemcpyKind enumerator.",
+  cudaMemset: "Fills device memory with a repeated byte value. Byte-granular, so it cannot set a float to anything but a repeated 8-bit pattern.",
   cudaDeviceSynchronize: "Blocks until every previously issued device work has completed.",
   cudaGetLastError: "Returns and CLEARS the last error. `cudaSuccess` means nothing has gone wrong yet.",
   cudaGetErrorString: "The human-readable form of a cudaError_t. The message a learner can act on.",
+  cudaMallocHost: "Page-locked host memory. Not implemented in this Playground.",
+  cudaMallocManaged: "Memory the host and device may both touch. Not implemented in this Playground.",
+  cudaHostAlloc: "Page-locked host allocation, the host-side form of cudaMallocHost. Not implemented in this Playground.",
+  cudaMemcpyAsync: "The asynchronous copy. Needs a stream. Not implemented in this Playground.",
+  cudaMemcpyHostToDevice: "A `cudaMemcpyKind`: host to device. The fourth argument of cudaMemcpy, not a function.",
+  cudaMemcpyDeviceToHost: "A `cudaMemcpyKind`: device to host, which is how results come back. The fourth argument of cudaMemcpy, not a function.",
+  cudaMemcpyDeviceToDevice: "A `cudaMemcpyKind`: device to device. The fourth argument of cudaMemcpy, not a function.",
+  cudaMemcpyHostToHost: "A `cudaMemcpyKind`: host to host. The fourth argument of cudaMemcpy, not a function.",
+  cudaMemcpyDefault: "A `cudaMemcpyKind`: inferred from the pointers. The fourth argument of cudaMemcpy, not a function.",
+  cudaMemsetAsync: "cudaMemset on a stream. Not implemented in this Playground.",
+  cudaMemGetInfo: "Free and total device memory. Not implemented in this Playground; the live panel reads the same figure from the harness.",
+  cudaStreamSynchronize: "Waits on one stream. Not implemented in this Playground; there is a single implicit stream, and cudaDeviceSynchronize waits for it.",
+  cudaPeekAtLastError: "Reads the last error without clearing it. Not implemented in this Playground.",
+  cudaGetErrorName: "The symbolic name of a cudaError_t. Not implemented in this Playground; cudaGetErrorString gives the message.",
+  cudaSuccess: "Zero: the enumerator every runtime call returns on success. An enumerator, so it resolves at compile time rather than calling into the shim.",
+  cudaErrorInvalidValue: "An argument was out of range, usually a pointer or a count.",
+  cudaErrorMemoryAllocation: "A device allocation failed. The device is out of memory.",
+  cudaErrorLaunchFailure: "The kernel launch itself failed. Compare with `cudaGetLastError` immediately after the launch, which is where the status is set.",
+  cudaError_t: "The error type. An enumerator, so it needs no shim entry.",
+  cudaMemcpyKind: "The direction argument to cudaMemcpy. An enumerator, so it needs no shim entry.",
+  cudaStream_t: "A stream handle. A typedef of an opaque pointer here, so it compiles but no stream API is implemented.",
+  cudaLaunchKernel: "Declared by the shim header and resolvable, but with nothing behind it here: taking its address compiles, calling it fails to load. `<<<>>>` compiles to the `hipLaunchKernel` call, which is why launches work.",
   __shared__: "Block-scoped memory, one copy per block, on the compute unit's own LDS. Fast, and banked.",
   __global__: "A kernel. Launched with <<<blocks, threads>>> and cannot return a value.",
   __device__: "A device function. Called from a kernel, not from the host.",
@@ -95,10 +129,6 @@ export const CUDA_DOCS: Readonly<Record<string, string>> = {
   __launch_bounds__: "Tells the compiler how many threads a block will have, so it can budget registers.",
 };
 
-/**
- * Snippets offered as completion: whole shapes rather than bare keywords, because
- * the mistake they prevent is structural. Each compiles in this Playground.
- */
 export const CUDA_SNIPPETS = [
   {
     label: "__global__ kernel",
@@ -147,30 +177,17 @@ export const CUDA_SNIPPETS = [
   },
 ] as const;
 
-/**
- * The lint rules.
- *
- * Every rule is decidable from the text alone, which is the only acceptable bar
- * for a diagnostic shown to a learner.
- */
 export type LintRule = {
   id: string;
   severity: "error" | "warning" | "hint";
   message: string;
-  /** One-based, because that is what Monaco wants and what a reader counts by. */
-  line: number;
+    line: number;
   column: number;
-  /** Span length in characters, for the squiggle's extent. */
-  length: number;
+    length: number;
 };
 
 const MAX_LINT_DEPTH = 64;
 
-/**
- * Strip comments and string literals, preserving offsets exactly so a position
- * found here indexes the original text. Without it a barrier mentioned inside a
- * comment or a `__shared__` inside a printf format string is a false positive.
- */
 function blankCommentsAndStrings(source: string): string {
   const out = source.split("");
   let i = 0;
@@ -207,7 +224,6 @@ function blankCommentsAndStrings(source: string): string {
   return out.join("");
 }
 
-/** Byte offset -> { line, column }, both one-based. */
 function offsetToPosition(source: string, offset: number): { line: number; column: number } {
   let line = 1;
   let lineStart = 0;
@@ -220,21 +236,6 @@ function offsetToPosition(source: string, offset: number): { line: number; colum
   return { line, column: offset - lineStart + 1 };
 }
 
-/**
- * Lint one CUDA source.
- *
- * - unbalanced braces and parentheses. The compiler catches these, but with a
- *   message about a token the learner has not met.
- * - `__syncthreads()` inside an `if` or a loop: the barrier is a block-wide
- *   rendezvous, so threads that took the other branch never arrive and it
- *   deadlocks. Textual only -- it cannot see whether the branch is uniform -- so
- *   it is a warning and never an error.
- * - a `__syncthreads()` with no `__shared__` write or read anywhere in the file.
- *   Usually a leftover from a kernel that no longer needs it. Weak, so a hint.
- * - `warpSize`, which reads as portable but is 32 on both vendors.
- * - a `printf` in device code: legal in this Playground, but not in HIP, so it
- *   will not port.
- */
 export function lintCuda(source: string): LintRule[] {
   const code = blankCommentsAndStrings(source);
   const found: LintRule[] = [];
@@ -289,14 +290,7 @@ export function lintCuda(source: string): LintRule[] {
     // Already reported per-closer above; nothing to add.
   }
 
-  // --- kernel and brace depth ------------------------------------------------
-  // For each kernel, where its BODY's statements sit in the file's brace depth.
-  //
-  // The off-by-one is the whole rule: a barrier directly in the kernel body sits AT
-  // the body's depth, so comparing against the braces' own depth flags every
-  // correct block reduction. Flagged only when deeper than the statement depth,
-  // which is inside an if, a loop, or any other brace.
-  const kernelBodies: { start: number; statementDepth: number }[] = [];
+                const kernelBodies: { start: number; statementDepth: number }[] = [];
   const kernelPattern = /__global__\s*(?:__device__\s*)?(?:void|[\w:<>]+)\s+\w+\s*\([^)]*\)\s*\{/g;
   for (let match = kernelPattern.exec(code); match !== null; match = kernelPattern.exec(code)) {
     const braceOffset = match.index + match[0].length - 1;
@@ -306,14 +300,7 @@ export function lintCuda(source: string): LintRule[] {
     });
   }
 
-  // --- barrier rules ---------------------------------------------------------
-  //
-  // Conditional only -- an `if` or an `else`, never a loop: a barrier in a loop is
-  // the inner step of every correct block reduction. See blockKindBefore.
-  //
-  // The wording is conditional for the same reason. This cannot see whether the
-  // condition is uniform across the block, so it says what to check.
-  const enclosing = enclosingBlockKinds(code);
+                const enclosing = enclosingBlockKinds(code);
   const barrierPattern = /__syncthreads\s*\(\s*\)/g;
   const sawShared = /__shared__/.test(code);
   let barrierCount = 0;
@@ -369,7 +356,6 @@ export function lintCuda(source: string): LintRule[] {
   return found.sort((left, right) => left.line - right.line || left.column - right.column);
 }
 
-/** Brace depth immediately before `offset`. */
 function depthAt(code: string, offset: number): number {
   let depth = 0;
   for (let i = 0; i < offset && i < code.length; i++) {
@@ -379,19 +365,9 @@ function depthAt(code: string, offset: number): number {
   return depth;
 }
 
-/**
- * What kind of block encloses each character.
- *
- * A barrier inside ANY brace looks identical whether the brace is a conditional
- * or a loop, and the two have opposite answers, so the barrier rule needs to know
- * which. Classified from the last keyword before the `{`, ignoring whitespace and
- * any intervening `)`, which is enough for `} else {`, `for (...) {`, `if (x) {`,
- * `__global__ void f(...) {`.
- */
 export type BlockKind =
   | "if" | "else" | "for" | "while" | "do" | "switch" | "struct" | "function" | "block";
 
-/** The kinds, in the order `enclosingBlockKinds` numbers them. */
 export const BLOCK_KINDS: readonly BlockKind[] = [
   "block", "function", "struct", "if", "else", "for", "while", "do", "switch",
 ];
@@ -416,21 +392,13 @@ function blockKindBefore(code: string, braceOffset: number): BlockKind {
   }
   for (const [keyword, kind] of [["else", "else"], ["if", "if"], ["for", "for"], ["while", "while"], ["do", "do"], ["switch", "switch"], ["struct", "struct"]] as const) {
     if (!code.startsWith(keyword, i - keyword.length + 1)) continue;
-    // The character before the keyword must not be a word character, or this is
-    // the tail of a longer identifier: `myif` is not a conditional. A `\w` test
-    // here, not `\W`, since the boundary case is a non-word character.
-    const before = i - keyword.length;
+                const before = i - keyword.length;
     if (before < 0 || !/\w/.test(code[before])) return kind;
   }
   // Nothing recognisable, so this brace is a function body or a bare block.
   return "function";
 }
 
-/**
- * The innermost enclosing block kind at every offset. One pass, one array. A
- * function body and a bare block share a kind because nothing distinguishes them
- * textually and the rule that reads this only cares about the conditional kinds.
- */
 function enclosingBlockKinds(code: string): Uint8Array {
   const index = new Map(BLOCK_KINDS.map((kind, i) => [kind, i]));
   const kinds = new Uint8Array(code.length);
@@ -443,7 +411,6 @@ function enclosingBlockKinds(code: string): Uint8Array {
   return kinds;
 }
 
-/** Every CUDA identifier the editor knows, deduplicated and sorted for suggestions. */
 export function cudaIdentifiers(): string[] {
   return [...new Set<string>([...CUDA_KEYWORDS, ...CUDA_TYPES, ...CUDA_RUNTIME])].sort();
 }

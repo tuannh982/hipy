@@ -103,6 +103,7 @@ device_args=(
   -target-cpu "$target_arch"
   -O2
   -emit-obj
+  -debug-info-kind=line-tables-only
   -x hip
   -std=c++17
   -nogpulib

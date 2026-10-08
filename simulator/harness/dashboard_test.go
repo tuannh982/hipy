@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -264,9 +265,47 @@ func TestReferencesAndWarningsNameFieldsTheSampleCarries(t *testing.T) {
 	}
 }
 
+// The strip's byte columns are to-date totals, never since-launch figures.
+func TestTheStripRowsAreToDateTotals(t *testing.T) {
+	h := New(Config{MaxInst: 1})
+	t.Cleanup(h.Close)
+
+	schema := h.DashboardSchema()
+
+	for _, row := range schema.Hierarchy.Rows {
+		for _, path := range []string{row.ReadPath, row.WritePath} {
+			if strings.Contains(path, "SinceLaunch") {
+				t.Errorf("hierarchy row %q reads %q, which resets at every launch; the strip "+
+					"is a table of to-date totals", row.Label, path)
+			}
+		}
+	}
+
+	// Name the rows too: one resolving to neither path would pass above and print
+	// nothing.
+	wantRowPaths := map[string][2]string{}
+	for _, level := range builtMemLevels(h.sim) {
+		wantRowPaths[level] = [2]string{
+			fmt.Sprintf("memLevels.%s.readBytes", level),
+			fmt.Sprintf("memLevels.%s.writeBytes", level),
+		}
+	}
+	wantRowPaths["DRAM"] = [2]string{"dramReadBytes", "dramWriteBytes"}
+	for _, row := range schema.Hierarchy.Rows {
+		want, known := wantRowPaths[row.Label]
+		if !known {
+			t.Errorf("hierarchy row %q is not a level this build has", row.Label)
+			continue
+		}
+		if row.ReadPath != want[0] || row.WritePath != want[1] {
+			t.Errorf("hierarchy row %q reads %q/%q, want %q/%q",
+				row.Label, row.ReadPath, row.WritePath, want[0], want[1])
+		}
+	}
+}
+
 // The footer and the DRAM row are two renderings of one figure, so they must read the
-// same fields, and the absolute pair must stay out of the footer: it carries the setup
-// copy the rest of the panel excludes.
+// same fields. The strip is to-date, so the footer is too.
 func TestTheFooterAndTheDRAMRowReadTheSameFields(t *testing.T) {
 	h := New(Config{MaxInst: 1})
 	t.Cleanup(h.Close)
@@ -293,11 +332,29 @@ func TestTheFooterAndTheDRAMRowReadTheSameFields(t *testing.T) {
 				path, schema.Footer)
 		}
 	}
-	// The absolute pair carries the setup copy, so it must not be here.
-	for _, absolute := range []string{"dramReadBytes", "dramWriteBytes"} {
-		if _, named := tokens[absolute]; named {
-			t.Errorf("the footer reads %q, which is a total including the setup copy: %q",
-				absolute, schema.Footer)
+	// A per-launch figure resets, so it must stay out of a to-date footer.
+	for _, perLaunch := range []string{"dramReadSinceLaunchBytes", "dramWriteSinceLaunchBytes"} {
+		if _, named := tokens[perLaunch]; named {
+			t.Errorf("the footer reads %q, which resets at every launch while the strip "+
+				"beside it is a to-date total: %q", perLaunch, schema.Footer)
+		}
+	}
+}
+
+// The charts keep the per-launch figures, since they are drawn against time.
+func TestTheTrafficChartsStayPerLaunch(t *testing.T) {
+	h := New(Config{MaxInst: 1})
+	t.Cleanup(h.Close)
+
+	schema := h.DashboardSchema()
+	chart, found := findChart(schema, "dram")
+	if !found {
+		t.Fatal("the schema has no DRAM chart")
+	}
+	for _, series := range chart.Series {
+		if !strings.Contains(series.Path, "SinceLaunch") {
+			t.Errorf("DRAM chart series %q reads %q, a to-date total; the chart is drawn "+
+				"against time and segments per launch", series.ID, series.Path)
 		}
 	}
 }

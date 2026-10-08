@@ -8,5 +8,7 @@ toolchain/runner/node_modules/
 website/node_modules/
 website/public/toolchain/
 website/public/sim-runner.wasm
+website/public/sim-runner.wasm.br
 website/dist/
 toolchain/build/
+.wrangler

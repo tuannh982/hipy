@@ -78,7 +78,20 @@ func build(patterns []ldsbank.Pattern, stats ldsbank.Stats) (ldswire.LdsAnalysis
 					break
 				}
 			}
-			out.Lanes = append(out.Lanes, ldswire.LdsLane{Lane: lane, Bank: bank, Phase: phase})
+			addrs := p.Rep.LaneAddrs[lane]
+			n := p.Rep.NumAddrs
+			if n < 0 {
+				n = 0
+			}
+			if n > len(addrs) {
+				n = len(addrs)
+			}
+			out.Lanes = append(out.Lanes, ldswire.LdsLane{
+				Lane:  lane,
+				Bank:  bank,
+				Phase: phase,
+				Addrs: append([]uint32{}, addrs[:n]...),
+			})
 		}
 
 		for _, inst := range p.Instances {

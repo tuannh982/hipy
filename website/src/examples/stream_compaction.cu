@@ -122,8 +122,8 @@ int main(void) {
     cudaMemcpy(output, deviceOutput, COMPACT_N * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(state, deviceState, COMPACT_STATE * sizeof(int), cudaMemcpyDeviceToHost);
 
-    // The count, then the two ends. Each figure gets its own call: mixing %d and %.1f
-    // in one loses arguments here, and the last survivor printed as 0.0.
+    // The count, then the two ends. Each figure gets its own call so the output is
+    // one value per line, which is what the correctness suite parses.
     printf("elements = %d\n", COMPACT_N);
     printf("count = %d\n", state[COMPACT_BLOCKS]);
     printf("first = %.1f\n", output[0]);

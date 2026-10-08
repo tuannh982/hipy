@@ -23,7 +23,7 @@ SIMULATOR := simulator
 SMOKE_ARTIFACTS := $(TOOLCHAIN)/build/smoke
 SMOKE_SRC       := $(WEBSITE)/src/examples/reduction.cu
 
-.PHONY: help deps build test toolchain-test smoke website-test verify clean distclean from-scratch
+.PHONY: help deps build deploy-cfp test toolchain-test smoke website-test verify clean distclean from-scratch
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -47,6 +47,11 @@ endif
 build: ## Build the wasm harness and the website (requires deps for the toolchain driver)
 	npm run prepare-assets --prefix $(WEBSITE)
 	npm run build --prefix $(WEBSITE)
+
+# The script builds, creates the Pages project if absent, and uploads, so this
+# target adds nothing but the discoverable name.
+deploy-cfp: ## Build the site and publish it to Cloudflare Pages
+	./scripts/deploy-cf-pages.sh
 
 test: toolchain-test website-test ## Run the toolchain, Go, and website test suites
 	$(MAKE) -C $(SIMULATOR) test

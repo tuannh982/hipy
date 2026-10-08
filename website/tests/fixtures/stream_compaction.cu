@@ -106,7 +106,7 @@ int main(void) {
 
     // The count, then the two ends. The count is the other half of what compaction
     // is for: a dense output whose length nobody knows is only half written. It gets
-    // its own line because mixing %d and %.1f in one call loses arguments here.
+    // its own line so the suite can read the count before the survivors.
     // Every element, because the correctness suite compares all of them against a
     // CPU reference. A sample would pass on a kernel that is wrong in the middle.
     printf("%d\n", state[COMPACT_BLOCKS]);

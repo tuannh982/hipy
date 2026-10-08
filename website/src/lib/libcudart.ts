@@ -9,12 +9,7 @@ type HostInstance = { exports: { memory: WebAssembly.Memory | null } };
 type GoRuntime = {
   importObject: WebAssembly.Imports;
   run(instance: WebAssembly.Instance): Promise<unknown>;
-  // Called by wasm_exec's wasmExit when the Go program stops, with its exit code, and
-  // the only signal that a runtime which died on another goroutine is gone: a panic
-  // on the driver's engine goroutine takes the whole module with it. Replacing
-  // wasm_exec's default per instance is how the worker learns a module has stopped
-  // answering.
-  exit: (code: number) => void;
+            exit: (code: number) => void;
 };
 type OutputCallback = (bytes: Uint8Array) => void;
 type WasmImport = { moduleName: string; importName: string; kind?: number; signature?: string };
@@ -75,12 +70,6 @@ function validateHostRange(memory: Uint8Array, ptr: number, length: number, oper
   }
 }
 
-// The host ABI passes a bare `void *[]` of argument addresses and no count, so the
-// count is recovered from the array: clang emits the initializer list as consecutive
-// words, so the slots form an arithmetic run with a common step of 4. A slot that is
-// not a pointer into host memory, or that leaves the run, ends the list, because
-// clang makes no promise to zero the word after the arguments. A list that reaches
-// the cap without a terminator is an error rather than a truncation.
 const MAX_KERNEL_ARGS = 32;
 
 function kernelArgSlots(memory: Uint8Array, argsPtr: number, kernel: string): number[] {
@@ -141,9 +130,7 @@ function hostBytes(hostInstance: HostInstance, ptr: number, length: number): Uin
 }
 
 // A Go pointer is a byte offset into the module's 32-bit linear memory, so it is
-// unsigned. `//go:wasmexport` returns i32 and WebAssembly hands an i32 result to
-// JavaScript sign-extended, so an address at or above 0x80000000 arrives negative.
-// Coerce in both directions: into an export and out of an import.
+// unsigned. `
 function goPointer(ptr: number): number {
   return ptr >>> 0;
 }
@@ -442,9 +429,11 @@ function formatPrintf(hostInstance: HostInstance, formatPtr: number, varargsPtr:
       output += "%";
       continue;
     }
+    // Width and precision are read past, not applied, so "%.1f" prints toFixed(6); deferred, because nothing shipped uses them and a half-done width implementation is its own source of wrong numbers.
     while (index < format.length && "0123456789.-+ #l".includes(format[index])) index++;
     const conversion = format[index];
     if (conversion === "f" || conversion === "F" || conversion === "e" || conversion === "E" || conversion === "g" || conversion === "G") {
+                                                      argPtr = (argPtr + 7) & ~7;
       const value = new DataView(memory.buffer, memory.byteOffset, memory.byteLength).getFloat64(argPtr, true);
       argPtr += 8;
       output += conversion === "f" || conversion === "F" ? value.toFixed(6) : String(value);
@@ -604,10 +593,7 @@ function createLibcudart({ go, goInstance, hostInstance, onStdout }: LibcudartOp
       try {
         const registration = registrations.get(hostStub);
         if (!registration) throw new Error(`unknown host stub ${hostStub}`);
-        // Whatever __hipPushCallConfiguration recorded is what runs, unchanged. The
-        // slots here are the pushed record's copies, so their addresses differ from
-        // the ones the source's <<<>>> was written into while the values match.
-        const grid = readRecord(hostInstance, gridPtr);
+                                const grid = readRecord(hostInstance, gridPtr);
         const block = readRecord(hostInstance, blockPtr);
         const hostMemory = view(hostInstance.exports.memory);
         const argParts: Uint8Array[] = [];

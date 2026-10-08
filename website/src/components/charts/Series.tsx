@@ -1,7 +1,3 @@
-// A plotted time series, with the controls a Grafana panel has.
-//
-// d3-shape produces the path data and nothing here touches the DOM directly. The
-// interaction arithmetic lives in ../../lib/chart/view.ts.
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -22,14 +18,11 @@ import {
 import type { SampleTimes, View } from "../../lib/chart/view";
 
 export type Series = {
-  /** Stable across renders; it keys the path and the legend. */
-  id: string;
+    id: string;
   label: string;
   color: string;
-  /** Draws the line and the legend swatch dashed, for direction on a kernel chart. */
-  dashed?: boolean;
-  /** Absent entries are a gap, not a zero. See the note in seriesGeometry. */
-  values: readonly (number | undefined)[];
+    dashed?: boolean;
+    values: readonly (number | undefined)[];
 };
 
 const DASH = "5 3";
@@ -37,16 +30,8 @@ const DASH = "5 3";
 // bottom carries the tick labels AND the axis title under them.
 const MARGIN = { top: 10, right: 12, bottom: 34, left: 48 } as const;
 
-/** Wheel steps. Three per notch reads as one notch rather than three. */
 const WHEEL_ZOOM = 1.18;
 
-/**
- * The host element's width in CSS pixels, tracked live.
- *
- * The chart draws in REAL pixels rather than scaling a fixed viewBox to fit: with
- * `preserveAspectRatio="none"` and a CSS width of 100%, every glyph on a wide pane
- * is drawn wider than it is tall, and scaling uniformly instead would letterbox it.
- */
 function useMeasuredWidth(fallback: number): [RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(fallback);
@@ -65,15 +50,6 @@ function useMeasuredWidth(fallback: number): [RefObject<HTMLDivElement | null>, 
   return [ref, width];
 }
 
-/**
- * The path data for a set of series over a shared x domain.
- *
- * `curveMonotoneX` rather than the default linear interpolation because a live
- * series arrives at uneven sim-time spacing, and a linear join draws a diagonal
- * across a gap that never happened. Monotone also avoids the overshoot a cubic
- * spline would add, which on a rate axis can put a line below zero between two
- * positive samples.
- */
 function seriesGeometry(
   series: readonly Series[],
   x: (value: number) => number,
@@ -100,54 +76,15 @@ function seriesGeometry(
 export type TimeSeriesProps = {
   series: readonly Series[];
   height?: number;
-  /**
-   * One simulated time per point, in picoseconds, indexed by the SERIES' OWN point
-   * number.
-   *
-   * Not by the sample number: a rate series has one fewer point than there are
-   * samples and its point i describes the interval ending at sample i+1, so passing
-   * the samples' times unshifted puts every point one sample late. See SampleTimes.
-   */
-  times: SampleTimes;
-  /** The unit of the y axis, stated on the axis rather than in every tick. */
-  yAxisLabel?: string;
-  /** What the x axis IS, with its unit still to be filled in. The unit follows the visible span, so a caller cannot know it in advance. */
-  xAxisTitle?: string;
+    times: SampleTimes;
+    yAxisLabel?: string;
+    xAxisTitle?: string;
   formatY?: (value: number) => string;
-  /**
-   * A flat line at a known ceiling -- the device's lane count, say.
-   *
-   * A series of COUNTS has no natural top, so the axis is scaled to the data's own
-   * peak and the reader cannot see how much room is left. "241" means nothing until
-   * you can see that 256 is the most there is. Drawn dashed and dimmed so it reads
-   * as a bound rather than as data, and labelled.
-   */
-  reference?: { value: number; label: string };
-  /** Stated in the accessible name; the axis labels alone are not a description. */
-  ariaLabel: string;
+    reference?: { value: number; label: string };
+    ariaLabel: string;
   emptyMessage: string;
 };
 
-/**
- * One or more series over simulated time, zoomable and pannable.
- *
- * The x axis is SIMULATED TIME, so the spacing between points is real: two samples
- * 20 us apart are drawn 20 us apart whether or not there happen to be samples in
- * between. An index axis would draw the stream's ragged sampling pattern as a smooth
- * one, and a slope on it would mean nothing. Precision follows the window, not the
- * run; see timeAxis.ts.
- *
- * Controls:
- *
- * - **wheel** zooms about the cursor. Plain wheel, not ctrl+wheel: the panel is the
- *   whole pane and a modifier requirement is one more thing to discover. Page scroll
- *   is suppressed only while the pointer is over the plot.
- * - **shift+wheel** pans, matching the wheel direction convention.
- * - **drag** selects a range and zooms to it; a drag under six pixels does nothing.
- * - **hover** gives a crosshair and every series' value at that point in time.
- * - **legend click** hides a series, remembered per chart.
- * - **reset** returns to the full range, and only appears once zoomed.
- */
 export function TimeSeries({
   series,
   height = 108,
@@ -164,10 +101,7 @@ export function TimeSeries({
   const [view, setView] = useState<View | null>(null);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
   const [cursor, setCursor] = useState<number | null>(null);
-  // A drag in progress. Held in a ref, not state: it changes on every pointermove
-  // and re-rendering the whole chart on each one would make dragging slower than
-  // the chart it is dragging.
-  const drag = useRef<{ anchorFraction: number; pixels: number } | null>(null);
+        const drag = useRef<{ anchorFraction: number; pixels: number } | null>(null);
   const sampleCount = series.reduce((most, entry) => Math.max(most, entry.values.length), 0);
   const plotWidth = Math.max(80, width - MARGIN.left - MARGIN.right);
   const plotHeight = height - MARGIN.top - MARGIN.bottom;
@@ -175,10 +109,7 @@ export function TimeSeries({
   const window = view === null ? fullView(sampleCount) : clampView(view, sampleCount);
   const visible = series.filter((entry) => !hidden.has(entry.id));
   const top = peak(visible.flatMap((entry) => entry.values));
-  // The ceiling is part of the data's range even though no sample reaches it. A
-  // domain that ignored it would scale to the peak and put the reference line
-  // outside the plot.
-  const ceiling = reference === undefined ? top : Math.max(top, reference.value);
+        const ceiling = reference === undefined ? top : Math.max(top, reference.value);
 
   const reset = (): void => {
     setView(null);
@@ -312,7 +243,6 @@ export function TimeSeries({
   );
 }
 
-/** The drawing itself, split out so the early return in TimeSeries stays hook-free. */
 function Plot({
   series,
   visible,
@@ -347,8 +277,7 @@ function Plot({
   ceiling: number;
   times: SampleTimes;
   yAxisLabel: string | undefined;
-  /** The x axis's subject, without its unit; see TimeSeriesProps. */
-  xAxisTitle: string | undefined;
+    xAxisTitle: string | undefined;
   formatY: (value: number) => string;
   ariaLabel: string;
   onWheel(event: React.WheelEvent): void;
@@ -357,10 +286,7 @@ function Plot({
   onPointerUp(event: React.PointerEvent): void;
   onPointerLeave(): void;
 }) {
-  // No headroom on a domain with a ceiling: the axis is pinned to the device's
-  // maximum and a line above it would be a lie, so the plot area is exactly 0..max
-  // and the top gridline IS the limit.
-  const domain: readonly [number, number] =
+        const domain: readonly [number, number] =
     reference === undefined
       ? headroom(ceiling)
       : [0, Math.max(reference.value, ceiling)];
@@ -370,11 +296,7 @@ function Plot({
   const windowSpan = axisToPs - axisFromPs;
   const axis = timeAxis(axisFromPs, axisToPs, 5);
 
-  // Window-relative, and by TIME: point i sits at (t[i] - t[from]) / (t[to-1] - t[from]).
-  //
-  // The series are NOT sliced: the clip path is what hides the rest, and it keeps
-  // the curve continuous across the window edge.
-  const x = (index: number): number => {
+          const x = (index: number): number => {
     if (windowSpan === 0) return plotWidth / 2;
     const time = times[index];
     if (typeof time !== "number" || !Number.isFinite(time)) return 0;
@@ -388,7 +310,7 @@ function Plot({
 
   const yTicks = linearTicks(y, domain, 3, formatY);
   const xTicks = axis.ticks.map((tick) => ({
-    at: ((tick.timePs - axisFromPs) / windowSpan) * plotWidth,
+    at: windowSpan === 0 ? plotWidth / 2 : ((tick.timePs - axisFromPs) / windowSpan) * plotWidth,
     label: tick.label,
   }));
   const geometry = seriesGeometry(visible, x, y, plotHeight);
@@ -539,12 +461,6 @@ function Plot({
   );
 }
 
-/**
- * The hover readout, drawn INSIDE the svg so it cannot be clipped by the pane's
- * overflow and it scales with the chart instead of sitting at a fixed pixel offset
- * from a moving line. Flipped to the other side of the crosshair when it would run
- * off the right edge, because a tooltip that leaves the chart is worse than none.
- */
 function CursorReadout({
   x,
   y,
@@ -555,8 +471,7 @@ function CursorReadout({
   x: number;
   y: number;
   plotWidth: number;
-  /** The cursor's simulated time, already scaled and in the axis's unit. */
-  at: string;
+    at: string;
   rows: readonly { label: string; color: string; text: string }[];
 }) {
   const width = 132;

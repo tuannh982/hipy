@@ -7,6 +7,7 @@ import (
 	"github.com/sarchlab/mgpusim/v5/amd/ldsbank"
 
 	"hipy/simulator/internal/otlpcmp"
+	"hipy/simulator/ldswire"
 )
 
 // runComparableFixture runs a uniform fixture and returns the harness that produced
@@ -135,6 +136,24 @@ func TestLDSBankAnalysisRecordsConflicts(t *testing.T) {
 				"really are at different addresses in the code object", other, p.Name, p.PC)
 		}
 		seen[p.PC] = p.Name
+	}
+
+	// Every active lane carries the address it read, and it lands in the bank the wire
+	// says: the table derives the bank from the address, so the two must agree.
+	for _, p := range pats {
+		for _, lane := range p.Lanes {
+			if len(lane.Addrs) == 0 {
+				t.Errorf("%s: lane %d carries no address, so the per-lane table "+
+					"cannot show what it read", p.Name, lane.Lane)
+				continue
+			}
+			addr := lane.Addrs[0]
+			if bank := int(addr/4) % ldswire.NumBanks; bank != lane.Bank {
+				t.Errorf("%s: lane %d reports bank %d but address %#x is in bank %d "+
+					"(address / 4 mod 32); the table derives the bank from the address, "+
+					"so the two must agree", p.Name, lane.Lane, lane.Bank, addr, bank)
+			}
+		}
 	}
 
 	if conflicted == 0 {

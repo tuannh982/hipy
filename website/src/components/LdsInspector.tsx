@@ -6,27 +6,38 @@ import {
   ldsAccessSentence,
   ldsBankColumns,
   ldsBankCountsReported,
+  ldsBankInfoNote,
+  ldsBankMapNote,
   ldsBankOccupancy,
+  ldsBankTooltip,
   ldsCleanNote,
   ldsDegreeSentence,
+  ldsLaneAddrLabel,
+  ldsLaneBankAddrs,
+  ldsLaneBytes,
   ldsLaneCount,
+  ldsLanePeersLabel,
   ldsLanePhaseLabel,
+  ldsLaneTableNote,
+  ldsListNote,
+  ldsPatternSource,
+  ldsOpcodeSentence,
+  ldsPhaseBankKey,
+  ldsPhaseBankLanes,
+  ldsPhaseStripNote,
+  ldsRowTooltip,
+  ldsSeverityLegend,
   ldsStatsNote,
   ldsSummaryLines,
   selectLdsPattern,
   LDS_BANK_COUNT,
+  LDS_LANE_COLUMNS,
+  LDS_LIST_COLUMNS,
 } from "../lib/ldsView";
 import type { LdsBankCell, LdsBankColumn } from "../lib/ldsView";
 import { barScale, categoryScale } from "../lib/chart/scale";
 
-// The bank map's three colours. bank and phaseRule are the sheet's neutrals spelled
-// out, because an SVG presentation attribute cannot read a custom property, so a
-// theme change has a third place to edit here alongside styles.css and CudaEditor's
-// Monaco colours.
-//
-// conflict stays red on purpose: it is a severity, and a reader has to be able to
-// recognise a contended bank without learning a palette first.
-export const LDS_PALETTE = { bank: "#333333", conflict: "#ef4444", phaseRule: "#2b2b2b" } as const;
+export const LDS_PALETTE = { bank: "#5c5c5c", conflict: "#ef4444", phaseRule: "#2b2b2b" } as const;
 
 // The phase segments on the lane axis, in draw order. Not severity colours: a phase
 // is a scheduling group, and its degree is written beside it in the legend.
@@ -43,21 +54,10 @@ const BAR_AREA = PLOT_HEIGHT - COUNT_BAND;
 const BANK_LABEL_BASELINE = PLOT_HEIGHT + 12;
 const AXIS_Y = PLOT_HEIGHT + 24;
 const MAP_HEIGHT = AXIS_Y + 14;
+// The right margin, for the rotated bank axis name, outside MAP_WIDTH so it cannot
+// overlap a column or the lane strip.
+const AXIS_GUTTER = 14;
 
-/**
- * One access, as 32 bank columns over a lane axis.
- *
- * Each column's HEIGHT is the number of distinct addresses that bank saw in the
- * access's busiest phase, and a column is red exactly when that number is above
- * one. The count is written on every conflicted column, because the height is
- * scaled to this access and so says which is deeper but not by how much.
- *
- * Not drawn from the lanes in each bank: a 64-lane broadcast puts 64 lanes in one
- * bank at one address, and a lane count draws it as the worst case in the ISA.
- *
- * The axis below carries the phases, because a bank is only contended by lanes the
- * hardware serves together.
- */
 function BankMap({
   pattern,
   columns,
@@ -69,14 +69,7 @@ function BankMap({
   // naming the lanes behind it is what makes a reader able to go and look.
   cells: LdsBankCell[];
 }) {
-  // Two d3 scales: a band scale for the 32 banks and the lane span below them, and a
-  // linear one for how deep a bank is. The lane scale is a band scale because the
-  // lane axis is discrete -- there is no lane 3.5.
-  //
-  // The depth scale starts at zero, which is the rule rather than a default: the
-  // height of a column IS the number of addresses in the bank, so a non-zero
-  // baseline would imply the ratio is something other than what it is.
-  const cellWidth = MAP_WIDTH / LDS_BANK_COUNT;
+                const cellWidth = MAP_WIDTH / LDS_BANK_COUNT;
   const banks = categoryScale(LDS_BANK_COUNT, MAP_WIDTH);
   const laneCount = ldsLaneCount(pattern);
   const lanes = categoryScale(laneCount, MAP_WIDTH);
@@ -90,20 +83,19 @@ function BankMap({
     : `Bank map for ${pattern.name}: this analysis reported no per-bank address counts`;
 
   return (
-    <svg className="lds-bankmap" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT + 6}`} role="img" aria-label={ariaLabel}>
+    <svg className="lds-bankmap" viewBox={`0 0 ${MAP_WIDTH + AXIS_GUTTER} ${MAP_HEIGHT + 6}`} role="img" aria-label={ariaLabel}>
       {columns.map((column) => {
         const x = banks(column.bank) ?? 0;
         const height = column.height * BAR_AREA;
+        // The wave-wide lane list is appended because that is what a MAP cell is for:
+        // the map spans the whole wave, while the addresses are scoped to one phase.
         const cell = cells[column.bank];
-        const phaseLabel = column.phase < 0 ? "" : ` in phase ${column.phase}`;
+        const across = cell === undefined || cell.lanes.length === 0
+          ? ""
+          : `; ${cell.lanes.length} ${cell.lanes.length === 1 ? "lane" : "lanes"} land here across all phases: ${cell.lanes.map((lane) => lane.lane).join(", ")}`;
         const title = !reported
           ? `bank ${column.bank}: this analysis reported no per-bank address counts`
-          : column.addrs === 0
-            ? `bank ${column.bank}: no address in any phase`
-            : `bank ${column.bank}: ${column.addrs} distinct ${column.addrs === 1 ? "address" : "addresses"}${phaseLabel}`
-              + (cell === undefined || cell.lanes.length === 0
-                ? ""
-                : `; ${cell.lanes.length} ${cell.lanes.length === 1 ? "lane" : "lanes"}: ${cell.lanes.map((lane) => lane.lane).join(", ")}`);
+          : `${ldsBankTooltip(pattern, column)}${across}`;
         return (
           <g key={column.bank}>
             {column.addrs > 0 && (
@@ -136,6 +128,15 @@ function BankMap({
           </g>
         );
       })}
+      <text
+        className="lds-axis-label"
+        x={MAP_WIDTH + AXIS_GUTTER / 2 + 2}
+        y={BANK_LABEL_BASELINE - 3}
+        textAnchor="middle"
+        transform={`rotate(-90 ${MAP_WIDTH + AXIS_GUTTER / 2 + 2} ${BANK_LABEL_BASELINE - 3})`}
+      >
+        bank
+      </text>
       <line x1={0} y1={AXIS_Y} x2={MAP_WIDTH} y2={AXIS_Y} stroke={LDS_PALETTE.phaseRule} strokeWidth={1} />
       {pattern.phases.map((phase, index) => {
         const first = laneX(phase.firstLane);
@@ -152,7 +153,7 @@ function BankMap({
             fill={PHASE_COLORS[index % PHASE_COLORS.length]}
             opacity={0.85}
           >
-            <title>{`phase ${index}: lanes ${phase.firstLane}–${phase.lastLane}, ${phase.lanes.length} active, degree ${phase.degree}`}</title>
+            <title>{`phase ${index}: lanes ${phase.firstLane}–${phase.lastLane}, ${phase.lanes.length} active, degree ${phase.degree}. Only lanes inside one phase can collide, so this phase costs ${phase.degree} ${phase.degree === 1 ? "cycle" : "cycles"}.`}</title>
           </rect>
         );
       })}
@@ -160,23 +161,53 @@ function BankMap({
       <text x={MAP_WIDTH} y={MAP_HEIGHT} textAnchor="end" className="lds-axis-label">lane {laneCount - 1}</text>
       {reported && (
         <text x={MAP_WIDTH / 2} y={MAP_HEIGHT} textAnchor="middle" className="lds-axis-label">
-          column height = distinct addresses in that bank
+          height = distinct addresses per bank
         </text>
       )}
     </svg>
   );
 }
 
-export function LdsInspector({ lds, targetArch }: { lds: LdsAnalysisData | null; targetArch: string | null }) {
-  // App.tsx already ran selectLdsModel on this same object to decide whether to
-  // render the tab, so this is the second call on the same data. Left as is: the
-  // selector is pure and the alternative is threading a model through a prop that
-  // has to survive lds === null anyway.
-  //
-  // The arch is passed in rather than read from a module global because the model
-  // this call produces renders its own caveats. It is nullable because the catalog
-  // it comes from is, and selectLdsModel renders that as prose naming no arch.
-  const model = lds ? selectLdsModel(lds, targetArch) : null;
+function PcCell({ pattern, onJump }: { pattern: LdsPattern; onJump: ((line: number) => void) | undefined }) {
+  const source = ldsPatternSource(pattern);
+  const address = `0x${pattern.pc.toString(16)}`;
+  if (source === null || onJump === undefined) {
+    return <span className="lds-row-pc">pc {address}</span>;
+  }
+  const label = `Jump to ${source.file} line ${source.line}`;
+  return (
+    <span
+      className="lds-row-pc lds-pc-link"
+      role="button"
+      tabIndex={0}
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onJump(source.line);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onJump(source.line);
+      }}
+    >
+      pc {address} ↗
+    </span>
+  );
+}
+
+export function LdsInspector({
+  lds,
+  targetArch,
+  onJumpToLine,
+}: {
+  lds: LdsAnalysisData | null;
+  targetArch: string | null;
+    onJumpToLine?: (line: number) => void;
+}) {
+                  const model = lds ? selectLdsModel(lds, targetArch) : null;
   // A run has not happened yet, as opposed to a run that reported no LDS at all:
   // the first is an absence of data and the second is a result.
   if (lds === null) {
@@ -187,10 +218,10 @@ export function LdsInspector({ lds, targetArch }: { lds: LdsAnalysisData | null;
   if (model === null) {
     return <div className="panel-empty">This kernel performed no LDS accesses, so there are no bank conflicts to report. That is the whole result, not a missing one.</div>;
   }
-  return <LdsPanel model={model} />;
+  return <LdsPanel model={model} onJumpToLine={onJumpToLine} />;
 }
 
-function LdsPanel({ model }: { model: LdsModel }) {
+function LdsPanel({ model, onJumpToLine }: { model: LdsModel; onJumpToLine?: (line: number) => void }) {
   const [selected, setSelected] = useState(0);
   // A run replaces the analysis under a tab that may still hold the index of a row
   // that no longer exists, so the index is clamped rather than trusted.
@@ -207,6 +238,11 @@ function LdsPanel({ model }: { model: LdsModel }) {
   const countsReported = ldsBankCountsReported(pattern);
   const deepestBank = columns.reduce((most, column) => (column.addrs > most.addrs ? column : most), columns[0]);
   const unphasedLanes = pattern.lanes.filter((lane) => lane.phase < 0 || lane.phase >= pattern.phases.length).length;
+  // The table groups by phase and bank; the map's own cells group by bank across the
+  // whole wave, which is right for a tooltip and wrong for a table.
+  const phaseBanks = ldsPhaseBankLanes(pattern);
+  // One number for the whole table: every lane of one instruction moves the same footprint.
+  const laneBytes = ldsLaneBytes(pattern);
 
   return (
     <div className="lds-panel">
@@ -214,11 +250,23 @@ function LdsPanel({ model }: { model: LdsModel }) {
         {ldsSummaryLines(model).map((line) => <span key={line}>{line}</span>)}
       </div>
 
+      {/* The geometry the whole panel is measured against, stated once. */}
+      <p className="lds-bank-info">{ldsBankInfoNote()}</p>
+
       {model.approximate.map((note) => <p key={note} className="lds-approximate">{note}</p>)}
       {statsNote !== null && <p className="lds-rep-note">{statsNote}</p>}
 
       {cleanNote !== null && <div className="lds-clean">{cleanNote}</div>}
 
+      <p className="table-note lds-list-note">{ldsListNote(model)}</p>
+
+      {/* The columns, named. Explanations live in the title attributes so the headers
+          stay headers; the legend below carries what a hover cannot. */}
+      <div className="lds-list-head">
+        {LDS_LIST_COLUMNS.map((column) => (
+          <span key={column.key} className={`lds-head-${column.key}`} title={column.help}>{column.label}</span>
+        ))}
+      </div>
       <ul className="lds-list">
         {model.patterns.map((candidate, index) => {
           const grade = ldsSeverity(candidate.degree);
@@ -229,17 +277,26 @@ function LdsPanel({ model }: { model: LdsModel }) {
                 aria-pressed={index === selected}
                 className={index === selected ? "lds-row active" : "lds-row"}
                 onClick={() => setSelected(index)}
+                title={ldsRowTooltip(candidate)}
               >
                 <span className="lds-row-degree" style={{ backgroundColor: grade.color }}>{candidate.degree > 0 ? candidate.degree : "–"}</span>
                 <span className="lds-row-name">{candidate.name}</span>
                 <span className="lds-row-stride">stride {candidate.stride} B</span>
-                <span className="lds-row-pc">pc 0x{candidate.pc.toString(16)}</span>
+                <PcCell pattern={candidate} onJump={onJumpToLine} />
                 <span className="lds-row-count">×{candidate.count}</span>
               </button>
             </li>
           );
         })}
       </ul>
+      <div className="chart-legend lds-degree-legend">
+        {ldsSeverityLegend().map((band) => (
+          <span className="legend-item" key={band.label}>
+            <i style={{ backgroundColor: band.color }} />
+            {band.label}
+          </span>
+        ))}
+      </div>
 
       <div className="lds-detail">
         <div className="section-title">
@@ -250,8 +307,35 @@ function LdsPanel({ model }: { model: LdsModel }) {
           <span className="lds-verdict" style={{ color: severity.color }}>{severity.label}</span>
         </div>
 
+        {/* The line table's answer, as a control. Absent, with the reason, when there is none. */}
+        {(() => {
+          const source = ldsPatternSource(pattern);
+          if (source === null) {
+            return (
+              <p className="lds-flag">
+                This kernel's code object carried no line table, so its program counter cannot be attributed to a
+                source line. Everything else on this page is measured; this one row is not available.
+              </p>
+            );
+          }
+          return (
+            <div className="lds-source">
+              <span className="lds-source-where">
+                {`${source.file}:${source.line} — attributed by the code object's line table, at -O2`}
+              </span>
+              {onJumpToLine !== undefined && (
+                <button type="button" className="button button-small" onClick={() => onJumpToLine(source.line)}>
+                  {`Jump to line ${source.line}`}
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* In the order a reader meets the questions; each defers to ldsBankInfoNote for geometry. */}
         <p className="lds-access">{ldsAccessSentence(pattern)}</p>
         <p className="lds-degree">{ldsDegreeSentence(pattern)}</p>
+        <p className="lds-access">{ldsOpcodeSentence(pattern)}</p>
         {!pattern.uniformStride && (
           <p className="lds-flag">This access does not step uniformly, so its stride is the first phase's and the degree may differ between phases.</p>
         )}
@@ -264,12 +348,23 @@ function LdsPanel({ model }: { model: LdsModel }) {
           <p className="lds-flag">No per-lane bank map was recorded for this access.</p>
         ) : (
           <>
+            <p className="table-note lds-map-note">{ldsBankMapNote()}</p>
             <BankMap pattern={pattern} columns={columns} cells={cells} />
             <div className="chart-legend">
               {countsReported && (
-                <span className="legend-item">
-                  {`column height: distinct addresses in one bank in one phase · deepest is bank ${deepestBank.bank} at ${deepestBank.addrs}`}
-                </span>
+                <>
+                  <span className="legend-item">
+                    <i style={{ backgroundColor: LDS_PALETTE.conflict }} />
+                    conflicted bank: more than one address in its busiest phase, so that phase costs that many cycles
+                  </span>
+                  <span className="legend-item">
+                    <i style={{ backgroundColor: LDS_PALETTE.bank }} />
+                    one address only: a broadcast or a lone lane, served in one cycle
+                  </span>
+                  <span className="legend-item">
+                    {`height: distinct addresses per bank in its busiest phase · deepest is bank ${deepestBank.bank} at ${deepestBank.addrs}`}
+                  </span>
+                </>
               )}
               {pattern.phases.map((phase, index) => (
                 <span className="legend-item" key={index}>
@@ -279,34 +374,47 @@ function LdsPanel({ model }: { model: LdsModel }) {
               ))}
               {pattern.phases.length === 0 && <span className="legend-item">no phases were recorded</span>}
             </div>
+            <p className="lds-rep-note">{ldsPhaseStripNote(pattern)}</p>
             {!countsReported && (
               <p className="lds-flag">
                 This analysis reported no per-bank address counts, so the map is empty. That is a missing measurement,
                 not a conflict-free access: the degree above is the only bank information here.
               </p>
             )}
-            <p className="lds-rep-note">
-              {unphasedLanes === 0
-                ? `${pattern.lanes.length} active lanes across ${LDS_BANK_COUNT} banks.`
-                : `${unphasedLanes} of ${pattern.lanes.length} active lanes match no phase range, so the map draws them but cannot say which phase serves them.`}
-            </p>
+            {/* Only when there is something to add; the plain count is in the table's note. */}
+            {unphasedLanes > 0 && (
+              <p className="lds-rep-note">
+                {`${unphasedLanes} of ${pattern.lanes.length} active lanes match no phase range, so the map draws them but cannot say which phase serves them.`}
+              </p>
+            )}
+            <p className="table-note lds-table-note">{ldsLaneTableNote(pattern)}</p>
             <div className="table-wrap">
               <table className="lds-lanes">
                 <thead>
-                  <tr><th>Lane</th><th>Bank</th><th>Phase</th><th>Shares its bank with</th></tr>
+                  <tr>
+                    {LDS_LANE_COLUMNS.map((column) => (
+                      <th key={column.key} title={column.help}>{column.label}</th>
+                    ))}
+                  </tr>
                 </thead>
                 <tbody>
                   {pattern.lanes.map((lane) => {
-                    const cell = cells[lane.bank];
                     // Highlighted on the address count rather than the lane count, so
                     // the table agrees with the map.
                     const column = columns[lane.bank];
+                    const peers = (phaseBanks.get(ldsPhaseBankKey(lane.phase, lane.bank)) ?? [])
+                      .filter((other) => other.lane !== lane.lane)
+                      .map((other) => other.lane);
+                    const addrs = ldsLaneBankAddrs(pattern, lane);
                     return (
                       <tr key={lane.lane} className={column !== undefined && column.conflicted ? "lds-crowded-row" : undefined}>
                         <td>{lane.lane}</td>
+                        <td className="lds-lane-addr">{ldsLaneAddrLabel(lane)}</td>
+                        <td>{laneBytes}</td>
                         <td>{lane.bank}</td>
                         <td>{ldsLanePhaseLabel(lane, pattern.phases)}</td>
-                        <td>{cell === undefined ? "—" : cell.lanes.map((other) => other.lane).join(", ")}</td>
+                        <td>{ldsLanePeersLabel(peers)}</td>
+                        <td>{addrs === null ? "—" : addrs}</td>
                       </tr>
                     );
                   })}

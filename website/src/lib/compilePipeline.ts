@@ -1,10 +1,6 @@
 import { boundaryById, type ToolchainBoundary } from "./toolchainBoundaries";
 import { allToolchains, archForDevice, offloadTarget, toolchainById, type Toolchain } from "./toolchains";
 
-// The one rejection this module enforces, read from the table the toolchain's
-// negative suite compiles against. Keyed by id rather than label: a label is free
-// to be reworded, an id is not. A missing id throws at import rather than producing
-// a learner-facing error with "undefined" in it.
 function boundary(id: string): ToolchainBoundary {
   const row = boundaryById(id);
   if (row === null) throw new Error(`toolchain/boundaries.json has no boundary with id ${id}`);
@@ -47,11 +43,6 @@ export type CompileEvent =
   | { type: "stdout"; text: string }
   | { type: "stderr"; text: string };
 
-// The device pass. The triple and the vendor-specific flags come from the toolchain
-// row, never from literals here: a literal would compile a second vendor's device
-// with the wrong target and only fail at the assembler. The arch is the only thing
-// the caller supplies, and it is what -target-cpu carries -- the triple names the
-// OS and ABI, not the ISA.
 function deviceArgs(toolchain: Toolchain, arch: string): string[] {
   return [
     "-cc1",
@@ -61,6 +52,7 @@ function deviceArgs(toolchain: Toolchain, arch: string): string[] {
     arch,
     "-O2",
     "-emit-obj",
+    "-debug-info-kind=line-tables-only",
     "-x",
     "hip",
     "-std=c++17",
@@ -127,20 +119,9 @@ export async function compilePipeline({
   source: string;
   assets: CompilerAssets;
   runtime: CompilerRuntime;
-  /**
-   * The toolchain that compiles the device side. Required, with no fallback: a
-   * build that guessed would compile for a part no one selected, and the mismatch
-   * is silent.
-   */
-  toolchainId: string;
-  /**
-   * The ISA to emit. The caller takes this from the same catalog entry as
-   * toolchainId, so the device decides both together; `device` is carried
-   * alongside so the arch can be re-derived rather than trusted.
-   */
-  arch: string;
-  /** Used only to cross-check `arch` against the registry. */
-  device?: string;
+    toolchainId: string;
+    arch: string;
+    device?: string;
   onEvent?: (event: CompileEvent) => void;
 }): Promise<{ deviceCodeObject: ArrayBuffer; hostWasm: ArrayBuffer }> {
   // Resolve the toolchain before anything is created, so a name the registry does
@@ -152,10 +133,7 @@ export async function compilePipeline({
       `this build ships ${allToolchains().map((row) => row.id).join(", ")}`,
     );
   }
-  // The arch is a claim about a device, so check it against the registry: an arch
-  // no device maps to is either a typo or a stale bundle, and clang would accept
-  // either and emit a code object nothing asked for.
-  const expected = device === undefined ? null : archForDevice(toolchainId, device);
+        const expected = device === undefined ? null : archForDevice(toolchainId, device);
   if (expected !== null && expected !== arch) {
     throw new Error(`device "${device}" on toolchain "${toolchainId}" is ${expected}, not the requested ${arch}`);
   }
@@ -252,8 +230,5 @@ function checkFp32(output: CompilerCommandOutput): void {
   });
   if (!offending) return;
   const line = offending.match(/:(\d+):\d+>$/)?.[1] ?? "unknown";
-  // The message is read from toolchain/boundaries.json rather than written here,
-  // so it is the same sentence the toolchain's own check-fp32.mjs emits. The row
-  // holds the stable prefix and this site appends its own source location.
-  throw new Error(`${boundary("fp64").message} (source.cu:${line})`);
+        throw new Error(`${boundary("fp64").message} (source.cu:${line})`);
 }

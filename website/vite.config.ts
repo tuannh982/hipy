@@ -1,4 +1,8 @@
-import { defineConfig } from "vite";
+import { existsSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vite";
 import { allToolchains } from "./src/lib/toolchains.ts";
 import { resolveToolchainPaths } from "./toolchain-paths.ts";
 
@@ -23,15 +27,59 @@ const isolationHeaders = {
 const toolchains = allToolchains();
 const toolchain = resolveToolchainPaths(toolchains);
 
+const SDK_RUNTIME_ROOTS = ["dist/browser-worker.js", "pkg/wasmer_sdk_js.js"];
+const OVERSIZED_HARNESS = "sim-runner.wasm";
+
+function deployableAssets(): Plugin {
+  const packageRoot = path.dirname(fileURLToPath(import.meta.url));
+  const sdkRoot = path.join(packageRoot, "node_modules", "@wasmer", "sdk");
+  const distDir = path.join(packageRoot, "dist");
+  const relativeImport = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bexport\s+\*\s+from\s*)["'](\.{1,2}\/[^"'\n]+)["']/g;
+
+  return {
+    name: "hipy:deployable-assets",
+    apply: "build",
+    generateBundle() {
+      for (const root of SDK_RUNTIME_ROOTS) {
+        const emitBase = path.posix.dirname(root);
+        const seen = new Set<string>();
+        const stack = [root];
+        while (stack.length > 0) {
+          const current = stack.pop() as string;
+          if (seen.has(current)) continue;
+          seen.add(current);
+          const absolute = path.join(sdkRoot, current);
+          if (!existsSync(absolute)) continue;
+          for (const match of readFileSync(absolute, "utf8").matchAll(relativeImport)) {
+            stack.push(path.posix.normalize(path.posix.join(path.posix.dirname(current), match[1])));
+          }
+          const emitted = path.posix.relative(emitBase, current);
+          if (emitted === path.posix.basename(root) || emitted.endsWith(".d.ts")) continue;
+          this.emitFile({
+            type: "asset",
+            fileName: `assets/${emitted}`,
+            source: readFileSync(absolute),
+          });
+        }
+      }
+    },
+
+    async closeBundle() {
+      await rm(path.join(distDir, OVERSIZED_HARNESS), { force: true });
+    },
+  };
+}
+
 export default defineConfig({
   base: toolchain.base,
+  plugins: [deployableAssets()],
   define: {
     __HIPY_TOOLCHAIN_DRIVER_URLS__: JSON.stringify(toolchain.driverUrls),
     __HIPY_TOOLCHAIN_ARCHIVE_URLS__: JSON.stringify(toolchain.archiveUrls),
     __HIPY_TOOLCHAIN_MANIFEST_URL__: JSON.stringify(toolchain.manifestUrl),
   },
   build: { assetsInlineLimit: 0 },
-  // src/App.tsx imports simulator/testdata/fixtures.json for the example
+  // src/examples/registry.ts imports simulator/testdata/fixtures.json for the example
   // titles, so that the picker, the harness and the example test all read one
   // name for an example. That file lives outside this package, so the dev server
   // needs its directory on the serving allow list; build-time resolution follows

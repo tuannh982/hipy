@@ -41,6 +41,7 @@ func (h *Harness) drainLdsbank() *ldsState {
 			if report.Patterns == nil {
 				report.Patterns = []LdsPattern{}
 			}
+			h.resolveSource(&report)
 			state.report = report
 			state.index = index
 		}

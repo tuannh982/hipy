@@ -13,10 +13,10 @@ index b8f5760..04c1a76 100644
  	case 13:
 diff --git a/amd/emu/gcn3/ldsbank_observe.go b/amd/emu/gcn3/ldsbank_observe.go
 new file mode 100644
-index 0000000..a4b116a
+index 0000000..3c0c91f
 --- /dev/null
 +++ b/amd/emu/gcn3/ldsbank_observe.go
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,110 @@
 +package gcn3
 +
 +import (
@@ -30,6 +30,16 @@ index 0000000..a4b116a
 +// report bank conflicts need no change.
 +type ldsBankSink interface {
 +	SetLDSBankAccess(a *ldsbank.Access)
++}
++
++// The address a PC counts up from, which only a timing wavefront can say: it is the
++// device address the driver copied the kernel's instruction bytes to, plus the code
++// object's entry offset. Asserted separately from ldsBankSink because emu.Wavefront
++// (emulation mode) implements the sink without a packet to read a base from, and a
++// state that cannot answer reports PC = 0 so every offset below is refused rather
++// than silently reported against the wrong code object.
++type ldsBankPCBase interface {
++	LDSBankPCBase() uint64
 +}
 +
 +// observeLDS records the per-lane addresses of the DS instruction about to run.
@@ -50,7 +60,26 @@ index 0000000..a4b116a
 +	var a ldsbank.Access
 +	// state.PC(), not inst.PC: nothing on the execution path writes inst.PC, so
 +	// it is always 0 here and Record would collapse every ds_read_b32 into one row.
-+	a.PC = state.PC()
++	//
++	// Minus the wavefront's PC base, so PC is an OFFSET WITHIN THE KERNEL'S CODE
++	// rather than the device address the kernel happens to sit at. That address is
++	// an artifact of where the driver allocator placed the code object, so it
++	// changes with the run and identifies the instruction to nobody: a host cannot
++	// look it up in a disassembly or a line table, and two runs of one kernel would
++	// report different PCs for one instruction. The offset is what the code object
++	// itself is indexed by. See wavefront.LDSBankPCBase.
++	//
++	// A PC below the base cannot happen (PC starts AT the base), so the subtraction
++	// is not guarded: an unsigned wrap would be a bug in the wavefront, and the
++	// host's range check would report it as an unmapped instruction.
++	base, hasBase := uint64(0), false
++	if b, ok := state.(ldsBankPCBase); ok {
++		base, hasBase = b.LDSBankPCBase(), true
++	}
++	if !hasBase {
++		return
++	}
++	a.PC = state.PC() - base
 +	a.Opcode = uint8(inst.Opcode)
 +	a.Exec = state.EXEC()
 +
@@ -100,10 +129,10 @@ index 0000000..a4b116a
 +}
 diff --git a/amd/ldsbank/ldsbank.go b/amd/ldsbank/ldsbank.go
 new file mode 100644
-index 0000000..02d35e8
+index 0000000..417245e
 --- /dev/null
 +++ b/amd/ldsbank/ldsbank.go
-@@ -0,0 +1,414 @@
+@@ -0,0 +1,443 @@
 +// Package ldsbank computes GCN3 LDS bank conflicts from the per-lane addresses
 +// a wavefront presents to a DS instruction.
 +//
@@ -247,7 +276,12 @@ index 0000000..02d35e8
 +
 +// Access is one dynamic execution of a DS instruction as the emulator sees it.
 +type Access struct {
-+	// PC groups executions of the same static instruction.
++	// PC is an OFFSET WITHIN THE KERNEL'S CODE -- the byte offset of the
++	// instruction from the first byte of the instruction block the host loaded, and
++	// never the device address that block happens to sit at. It is what indexes the
++	// code object's own bytes, so a host can resolve it against a disassembly or a
++	// DWARF line table, and it is stable across runs. See
++	// emu/gcn3.observeLDS for how the emulator arrives at it.
 +	PC uint64
 +
 +	// Opcode selects the footprint from the table above.
@@ -345,6 +379,18 @@ index 0000000..02d35e8
 +	// LaneBank is the bank each active lane's primary address maps to, and -1
 +	// for an inactive lane.
 +	LaneBank [WavefrontLanes]int
++
++	// LaneAddrs carries the addresses themselves, so a host can name them rather
++	// than only the bank each one landed in. Only the first NumAddrs entries of
++	// an active lane's row are meaningful; an inactive lane's row is zero.
++	LaneAddrs [WavefrontLanes][MaxAddrsPerLane]uint32
++
++	// NumAddrs is how many addresses per lane this opcode moves, from the
++	// opcode's own table entry. It is carried rather than left to a host to
++	// re-derive from the mnemonic, because the unused slot of a single-address
++	// opcode holds 0 -- a perfectly plausible address -- so without the count a
++	// reader cannot tell a real 0x0 from an absent second address.
++	NumAddrs int
 +}
 +
 +// PhaseLanes returns the lanes the hardware serves together in one phase: a
@@ -378,9 +424,21 @@ index 0000000..02d35e8
 +		PC:                            a.PC,
 +		PhaseModelApproximate:         info.phaseModelApproximate,
 +		AddressGranularityApproximate: info.addressGranularityApproximate,
++		NumAddrs:                      info.NumAddrs,
 +	}
 +	for i := range out.LaneBank {
 +		out.LaneBank[i] = -1
++	}
++
++	// Copied once for the whole access rather than per phase: the addresses are a
++	// property of the wavefront, not of how the hardware happened to cut it up.
++	for lane := 0; lane < WavefrontLanes; lane++ {
++		if a.Exec&(1<<uint(lane)) == 0 {
++			continue
++		}
++		for n := 0; n < info.NumAddrs && n < MaxAddrsPerLane; n++ {
++			out.LaneAddrs[lane][n] = a.Addr[lane][n]
++		}
 +	}
 +
 +	lanesPerPhase := info.LanesPerPhase()
@@ -736,7 +794,7 @@ index 4da340f..43c5492 100644
  		return true
  	}
 diff --git a/amd/timing/wavefront/wavefront.go b/amd/timing/wavefront/wavefront.go
-index 1e55dda..c51338f 100644
+index 1e55dda..35cebb5 100644
 --- a/amd/timing/wavefront/wavefront.go
 +++ b/amd/timing/wavefront/wavefront.go
 @@ -9,6 +9,7 @@ import (
@@ -759,7 +817,7 @@ index 1e55dda..c51338f 100644
  }
  
  // NewWavefront creates a new Wavefront of the timing package, wrapping the
-@@ -250,3 +256,16 @@ func (wf *Wavefront) WriteOperandBytes(operand *insts.Operand, laneID int, data
+@@ -250,3 +256,30 @@ func (wf *Wavefront) WriteOperandBytes(operand *insts.Operand, laneID int, data
  
  	wf.RegAccessor.WriteReg(operand.Register, operand.RegCount, laneID, waveOffset, data)
  }
@@ -767,6 +825,20 @@ index 1e55dda..c51338f 100644
 +// SetLDSBankAccess stashes the per-lane addresses of the LDS instruction now
 +// executing. The Analysis is computed later, by the LDS unit.
 +func (wf *Wavefront) SetLDSBankAccess(a *ldsbank.Access) { wf.ldsBankAccess = a }
++
++// LDSBankPCBase is the address a wavefront's PC counts up from: the device address
++// its kernel's instruction bytes were copied to, plus the code object's own entry
++// offset. initWfRegs sets PC to exactly this, and every instruction advances it by
++// its own size, so PC minus this base is an OFFSET WITHIN THE KERNEL'S CODE.
++//
++// An observer that wants to identify the instruction wants the offset, not the
++// device address: the base is wherever the driver allocator happened to put the
++// code object, so the absolute PC means nothing outside this run, while the offset
++// indexes the code object's own bytes and its DWARF line table. See
++// emu/gcn3.observeLDS.
++func (wf *Wavefront) LDSBankPCBase() uint64 {
++	return wf.Packet.KernelObject + wf.CodeObject.KernelCodeEntryByteOffset
++}
 +
 +// LDSBankAccess returns the stashed Access and clears it. Draining rather than
 +// peeking keeps the stash a one-slot mailbox: a wavefront runs one instruction at

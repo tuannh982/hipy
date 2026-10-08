@@ -1,22 +1,18 @@
 import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor/editor/editor.api";
-// Side-effect imports. `editor.api` registers no editor contributions, so every
-// language feature below needs one of these imported by hand. Deep paths into the
-// dependency are acceptable here because the package is exact-pinned and a rename
-// inside Monaco then fails the build rather than silently dropping a feature.
-//
-// Types come from the editor.api import above; see node-env.d.ts.
 import "monaco-editor/editor/contrib/hover/browser/hoverContribution";
-import "monaco-editor/editor/contrib/suggest/browser/suggest";
+import "monaco-editor/editor/contrib/suggest/browser/suggestController";
 import "monaco-editor/editor/contrib/find/browser/findController";
 import "monaco-editor/editor/contrib/gotoError/browser/gotoError";
+import "monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands";
+import "monaco-editor/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition";
+import "monaco-editor/editor/standalone/browser/referenceSearch/standaloneReferenceSearch";
 import "monaco-editor/editor/contrib/links/browser/links";
 import "monaco-editor/editor/contrib/parameterHints/browser/parameterHints";
 import "monaco-editor/editor/contrib/contextmenu/browser/contextmenu";
 import "monaco-editor/editor/contrib/snippet/browser/snippetController2";
 import "monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching";
 import "monaco-editor/editor/contrib/folding/browser/folding";
-import "monaco-editor/editor/contrib/documentSymbols/browser/documentSymbols";
 import "monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import type { CompilerDiagnostic } from "../lib/compilerDiagnostics";
@@ -30,11 +26,16 @@ import {
 import {
   CUDA_BOUNDARIES,
   CUDA_DOCS,
+  CUDA_ERROR_CODES,
   CUDA_KEYWORDS,
+  CUDA_MEMCPY_KINDS,
   CUDA_RUNTIME,
   CUDA_SNIPPETS,
   CUDA_TYPES,
   cudaIdentifiers,
+  isCudaRuntimeDeclaredOnly,
+  isCudaRuntimeImplemented,
+  isCudaRuntimeUnimplemented,
   lintCuda,
 } from "../lib/cudaLanguage";
 
@@ -108,18 +109,7 @@ function registerCudaLanguage(): void {
         [/\/\*/, "comment", "@comment"],
       ],
       comment: [
-        [/[^/*]+/, "comment"],
-        [/\*\//, "comment", "@pop"],
-        [/[/*]/, "comment"],
-      ],
-      string: [
-        [/[^\\"]+/, "string"],
-        // Its own token, so a stray `\\q` is visible rather than blending in.
-        [/"\\d{2,8}|[\\\\'"?nrtvabfexXUN0-7]/, "string.escape"],
-        [/"[^\\"]*$/, "string.invalid"],
-        [/"/, "string", "@pop"],
-      ],
-      symbols: [[/[=><!~?:&|+\-*/^%]+/, "operator"]],
+        [/[^^%]+/, "operator"]],
       whitespace: [
         [/[ \t\r\n]+/, "white"],
         [/\/\*/, "comment", "@comment"],
@@ -167,21 +157,53 @@ function registerCudaLanguage(): void {
   languageRegistered = true;
 }
 
-/**
- * Completion.
- *
- * Four sources, ranked so the likeliest want comes first: snippets, intrinsics,
- * runtime API, then types and keywords. `sortText` carries the rank, because
- * Monaco's default alphabetical order is useless here.
- *
- * Words already in the buffer are offered too, gathered from the whole document,
- * so a name the reader invented completes as readily as a builtin.
- */
+const CUDA_VECTOR_MEMBERS: Readonly<Record<string, readonly string[]>> = {
+  // uint3. A CUDA thread has no fourth index, so .w is deliberately absent.
+  threadIdx: ["x", "y", "z"],
+  blockIdx: ["x", "y", "z"],
+  blockDim: ["x", "y", "z"],
+  gridDim: ["x", "y", "z"],
+  float2: ["x", "y"],
+  int2: ["x", "y"],
+  uint2: ["x", "y"],
+  double2: ["x", "y"],
+  float4: ["x", "y", "z", "w"],
+  int4: ["x", "y", "z", "w"],
+  uint4: ["x", "y", "z", "w"],
+};
+
+const MEMBER_DOCS: Readonly<Record<string, string>> = {
+  x: "Component 0. Across lanes this is the one that varies fastest.",
+  y: "Component 1.",
+  z: "Component 2.",
+  w: "Component 3. Only on the 4-component types.",
+};
+
+function completionContext(model: monaco.editor.ITextModel, position: monaco.Position): {
+  word: monaco.editor.IWordAtPosition;
+  afterDot: string | null;
+} {
+  const word = model.getWordUntilPosition(position);
+  const before = model
+    .getValueInRange({
+      startLineNumber: position.lineNumber,
+      startColumn: 1,
+      endLineNumber: position.lineNumber,
+      endColumn: word.startColumn,
+    })
+    .replace(/[ \t]+$/, "");
+  const dotted = /([A-Za-z_][A-Za-z0-9_]*)\.$/.exec(before);
+  return {
+    word,
+    afterDot: dotted === null ? null : dotted[1],
+  };
+}
+
 function registerCompletionItemProvider(): void {
   monaco.languages.registerCompletionItemProvider(languageId, {
-    triggerCharacters: [".", "_", ">", ":"],
+    triggerCharacters: [".", "_", ">", ":", "<", "(", ","],
     provideCompletionItems(model, position) {
-      const word = model.getWordUntilPosition(position);
+      const { word, afterDot } = completionContext(model, position);
       const range: monaco.IRange = {
         startLineNumber: position.lineNumber,
         endLineNumber: position.lineNumber,
@@ -198,6 +220,50 @@ function registerCompletionItemProvider(): void {
       const suggest: monaco.languages.CompletionItem[] = [];
       let rank = 0;
       const next = (): string => String(rank++).padStart(4, "0");
+
+                        const members = afterDot === null ? undefined : CUDA_VECTOR_MEMBERS[afterDot];
+      if (members !== undefined) {
+        for (const member of members) {
+          suggest.push({
+            label: member,
+            kind: monaco.languages.CompletionItemKind.Field,
+            insertText: member,
+            detail: `${afterDot} member`,
+            documentation: MEMBER_DOCS[member],
+            sortText: next(),
+            range,
+          });
+        }
+        return { suggestions: suggest };
+      }
+
+      // An open `<<<`, where the geometry is about to be written and nothing
+      // keyword-shaped is the right answer.
+      const lineBefore = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      });
+      if (/<<<[^<>]*$/.test(lineBefore)) {
+        for (const launch of LAUNCH_CONFIGS) {
+          suggest.push({
+            label: launch.label,
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            detail: "launch configuration",
+            insertText: launch.insert,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            sortText: next(),
+            range: {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: 1,
+              endColumn: position.column,
+            },
+          });
+        }
+        return { suggestions: suggest };
+      }
 
       for (const snippet of CUDA_SNIPPETS) {
         suggest.push({
@@ -222,14 +288,25 @@ function registerCompletionItemProvider(): void {
           range,
         });
       }
-      for (const name of CUDA_RUNTIME) {
+                        for (const name of rankedRuntime()) {
         const docs = CUDA_DOCS[name];
         suggest.push({
           label: name,
           kind: monaco.languages.CompletionItemKind.Function,
           insertText: name,
-          detail: "HIP runtime API",
+          detail: runtimeDetail(name),
           documentation: docs,
+          sortText: next(),
+          range,
+        });
+      }
+      for (const name of [...CUDA_MEMCPY_KINDS, ...CUDA_ERROR_CODES, "cudaSuccess"]) {
+        suggest.push({
+          label: name,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          insertText: name,
+          detail: "enumerator — resolves at compile time",
+          documentation: CUDA_DOCS[name],
           sortText: next(),
           range,
         });
@@ -255,10 +332,7 @@ function registerCompletionItemProvider(): void {
         });
       }
 
-      // Words the reader already wrote. Excluded when they merely repeat what has
-      // been typed, so holding a modifier does not fill the list with the word
-      // under the cursor.
-      const seen = new Set<string>([...typed]);
+                        const seen = new Set<string>([...typed]);
       for (const match of source.matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\b/g)) {
         const word = match[0];
         if (seen.has(word) || word.length < 2) continue;
@@ -278,10 +352,37 @@ function registerCompletionItemProvider(): void {
   });
 }
 
-/**
- * Hover, from the same table completion reads. A symbol with no note says so
- * plainly rather than showing an empty hover.
- */
+function rankedRuntime(): readonly string[] {
+  const group = (test: (name: string) => boolean): readonly string[] =>
+    CUDA_RUNTIME.filter(test);
+  return [
+    ...group(isCudaRuntimeImplemented),
+    ...group((name) => !isCudaRuntimeImplemented(name) && !isCudaRuntimeUnimplemented(name)),
+    ...group(isCudaRuntimeDeclaredOnly),
+    ...group(isCudaRuntimeUnimplemented),
+  ];
+}
+
+function runtimeDetail(name: string): string {
+  if (isCudaRuntimeImplemented(name)) return "HIP runtime API";
+  if (isCudaRuntimeUnimplemented(name)) return "HIP runtime API — not implemented here";
+  if (isCudaRuntimeDeclaredOnly(name)) return "declared, but not callable here";
+  return "HIP runtime type";
+}
+
+const LAUNCH_CONFIGS = [
+  {
+    label: "<<<blocks, threads>>>",
+    detail: "One block per launch-size element",
+    insert: "<<<${1:blocks}, ${2:threads}>>>",
+  },
+  {
+    label: "<<<div-up grid, blockDim.x>>>",
+    detail: "The derived grid that covers every element exactly once",
+    insert: "<<<(${1:n} + blockDim.x - 1) / blockDim.x, ${2:blockDim.x}>>>\n",
+  },
+] as const;
+
 function registerHoverProvider(): void {
   monaco.languages.registerHoverProvider(languageId, {
     provideHover(model, position) {
@@ -295,8 +396,32 @@ function registerHoverProvider(): void {
         return { contents, range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn) };
       }
       if ((CUDA_RUNTIME as readonly string[]).includes(word.word)) {
-        contents.push({ value: `**${word.word}**(…) — HIP runtime`, isTrusted: false });
-        contents.push({ value: "Part of the HIP runtime API. This Playground's shim implements the subset the examples use." });
+                                        const runnable = isCudaRuntimeImplemented(word.word);
+        const compilesOnly = !runnable && !isCudaRuntimeUnimplemented(word.word) && !isCudaRuntimeDeclaredOnly(word.word);
+        const declaredOnly = isCudaRuntimeDeclaredOnly(word.word);
+        const title = runnable
+          ? `**${word.word}**(…) — HIP runtime`
+          : compilesOnly
+            ? `**${word.word}** — HIP runtime type`
+            : declaredOnly
+              ? `**${word.word}**(…) — declared, **not callable here**`
+              : `**${word.word}**(…) — HIP runtime, **not implemented here**`;
+        contents.push({ value: title, isTrusted: false });
+        contents.push({
+          value: runnable
+            ? "Part of the HIP runtime API. Implemented by this Playground's shim."
+            : compilesOnly
+              ? "A type or enumerator rather than a call, so it resolves at compile time and needs no shim entry."
+              : declaredOnly
+                ? "The shim header declares it, so it resolves, but there is no implementation behind it. Calling it fails to load; `<<<>>>` does not go through it."
+                : "Real CUDA, but this Playground's shim does not implement it. A program that calls it fails to load with `unsupported host imports`.",
+        });
+        return { contents, range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn) };
+      }
+      const enumerators: readonly string[] = [...CUDA_MEMCPY_KINDS, ...CUDA_ERROR_CODES, "cudaSuccess"];
+      if (enumerators.includes(word.word)) {
+        contents.push({ value: `\`${word.word}\` — HIP enumerator`, isTrusted: false });
+        contents.push({ value: docs ?? "A compile-time enumerator, so it resolves without a call into the shim." });
         return { contents, range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn) };
       }
       if ((CUDA_KEYWORDS as readonly string[]).includes(word.word)) {
@@ -309,25 +434,15 @@ function registerHoverProvider(): void {
   });
 }
 
-/**
- * The synthetic API document, created once and never disposed.
- *
- * Module-level because Monaco's models are reference-counted: a model nothing
- * holds can be collected, and a definition location pointing at a collected model
- * resolves to nothing.
- */
 let runtimeModel: monaco.editor.ITextModel | null = null;
 
-/**
- * Jump to definition, from two places in order: the file itself, then the
- * synthetic API document. The file covers macros, functions and kernels; the API
- * document covers `cudaMalloc` and the intrinsics, which have no definition here.
- *
- * Ctrl+click and F12 both come from this one provider.
- */
 function registerDefinitionProvider(): void {
   if (runtimeModel === null) {
-    runtimeModel = monaco.editor.createModel(cudaRuntimeSource(), languageId);
+                runtimeModel = monaco.editor.createModel(
+      cudaRuntimeSource(),
+      languageId,
+      monaco.Uri.parse(CUDA_RUNTIME_URI),
+    );
     runtimeModel.updateOptions({ tabSize: 2 });
   }
   const api = runtimeModel;
@@ -359,10 +474,7 @@ function registerDefinitionProvider(): void {
     },
   });
 
-  // References too, not just definitions: F12 on a macro tells you where it is,
-  // and every other use is usually what the reader wanted. Cheap, since the index
-  // is already built.
-  monaco.languages.registerReferenceProvider(languageId, {
+        monaco.languages.registerReferenceProvider(languageId, {
     provideReferences(model, position) {
       const word = model.getWordAtPosition(position);
       if (word === null) return [];
@@ -385,7 +497,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Signatures for the runtime calls, which have the most parameters to get wrong. */
 const SIGNATURES: Readonly<Record<string, { signature: string; doc: string }>> = {
   cudaMalloc: { signature: "cudaError_t cudaMalloc(void** devicePtr, size_t size)", doc: "The pointer is a DEVICE pointer; dereferencing it from the host faults." },
   cudaMallocHost: { signature: "cudaError_t cudaMallocHost(void** hostPtr, size_t size)", doc: "Page-locked host memory. Not implemented in this Playground." },
@@ -397,14 +508,11 @@ const SIGNATURES: Readonly<Record<string, { signature: string; doc: string }>> =
   cudaGetLastError: { signature: "cudaError_t cudaGetLastError()", doc: "Returns AND CLEARS the last error." },
   cudaGetErrorString: { signature: "const char* cudaGetErrorString(cudaError_t error)", doc: "The message a learner can act on." },
   cudaMemGetInfo: { signature: "cudaError_t cudaMemGetInfo(size_t* free, size_t* total)", doc: "Not implemented in this Playground; the live panel reads the same figure from the harness." },
+  // `dim3` is a type rather than a runtime call, but it is the one type whose
+  // parameters are easy to get wrong, and signature help is where they are checked.
+  dim3: { signature: "dim3 dim3(unsigned x = 1, unsigned y = 1, unsigned z = 1)", doc: "A launch shape. A one-argument dim3 is a 1-D block; the defaults make x the fast-varying index." },
 };
 
-/**
- * Signature help, for the runtime calls only.
- *
- * A limited set on purpose: a wrong parameter count shown as authoritative is
- * worse than no signature at all.
- */
 function registerSignatureHelpProvider(): void {
   monaco.languages.registerSignatureHelpProvider(languageId, {
     signatureHelpTriggerCharacters: ["(", ","],
@@ -442,7 +550,6 @@ function registerSignatureHelpProvider(): void {
   });
 }
 
-/** The parameter names out of `type name(a, b, c)`. */
 function parameterNames(signature: string): string[] {
   const open = signature.indexOf("(");
   const close = signature.lastIndexOf(")");
@@ -458,9 +565,10 @@ type CudaEditorProps = {
   value: string;
   diagnostics: CompilerDiagnostic[];
   onChange(value: string): void;
+  revealLine?: { line: number; at: number } | null;
 };
 
-export function CudaEditor({ value, diagnostics, onChange }: CudaEditorProps) {
+export function CudaEditor({ value, diagnostics, onChange, revealLine = null }: CudaEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onChangeRef = useRef(onChange);
@@ -486,10 +594,7 @@ export function CudaEditor({ value, diagnostics, onChange }: CudaEditorProps) {
     });
     editorRef.current = editor;
 
-    // Search, made discoverable: this editor has no menu bar and no visible find
-    // affordance. Guarded because the action is absent if the find contribution was
-    // ever trimmed.
-    editor.addAction({
+                editor.addAction({
       id: "hipy.findInCode",
       label: "Find in Code",
       contextMenuGroupId: "navigation",
@@ -532,16 +637,18 @@ export function CudaEditor({ value, diagnostics, onChange }: CudaEditorProps) {
     return () => monaco.editor.setModelMarkers(model, compilerOwner, []);
   }, [diagnostics]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor === null || revealLine === null) return;
+    const position = { lineNumber: revealLine.line, column: 1 };
+    editor.setPosition(position);
+    editor.revealPositionInCenter(position, monaco.editor.ScrollType.Immediate);
+    editor.focus();
+  }, [revealLine]);
+
   return <div className="editor-host" ref={hostRef} aria-label="HIP source editor" />;
 }
 
-/**
- * The two marker owners.
- *
- * The compiler's messages are the authority; the lint rules here are a fast
- * approximation. Markers from both appear at once, so Monaco's Problems panel has
- * to be able to tell a compiler error from a lint hint.
- */
 const compilerOwner = "clang";
 const lintOwner = "cuda-lint";
 
@@ -551,12 +658,6 @@ const MARKER_SEVERITY: Record<LintRule["severity"], monaco.MarkerSeverity> = {
   hint: monaco.MarkerSeverity.Info,
 };
 
-/**
- * Run the lint rules over the editor's current text.
- *
- * On every keystroke, which is why the rules are textual and narrow: one that
- * wanted to resolve types would be either slow or wrong.
- */
 function applyLint(editor: monaco.editor.IStandaloneCodeEditor): void {
   const model = editor.getModel();
   if (model === null) return;
@@ -570,10 +671,7 @@ function applyLint(editor: monaco.editor.IStandaloneCodeEditor): void {
       endColumn: rule.column + rule.length,
       message: rule.message,
       severity: MARKER_SEVERITY[rule.severity],
-      // `cuda-lint:<id>` so the rule behind a squiggle can be named from the
-      // marker itself. Monaco's own marker hover and goto-error widget render
-      // marker.source as innerText; no provider here reads it.
-      source: `cuda-lint:${rule.id}`,
+                        source: `cuda-lint:${rule.id}`,
     })),
   );
 }

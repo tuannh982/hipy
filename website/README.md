@@ -17,16 +17,16 @@ repository root, `make deps && make build`.
 | --- | --- |
 | `npm run dev` | Vite on <http://localhost:5173>, after `prepare-assets`. Pick an example, press **Run kernel**; the first run downloads the toolchain in-browser. |
 | `npm run build` | `tsc --noEmit`, then `website/dist`. |
-| `npm test` | The unit suite. No driver and no wasm build needed. |
+| `npm test` | Every file in `tests/`, which is the five suites below. No driver and no wasm build needed. |
+| `npm run test:libcudart` | The `libcudart.ts` shim: argument alignment and marshalling for every kernel parameter type, the `printf` format parser, and the CUDA runtime error strings. Pure logic, no toolchain needed. |
 | `npm run test:toolchain` | Compiles a fixture and checks what came out: an AMDGCN ELF for the requested arch, a wasm host module importing the CUDA entry points, the kernel symbol unmangled with its descriptor. A bad arch or toolchain id is refused. |
 | `npm run test:simulator` | Runs compiled fixtures in the wasm simulator: that a kernel completes, that a three-launch kernel runs all three, that an LDS kernel executes, that a truncated code object is refused. |
 | `npm run test:correctness` | Every kernel in `tests/fixtures/` against a CPU reference computed independently in `tests/lib/cpu-reference.mjs`, comparing **every** output element. The fixtures are mirrors of `src/examples` with only their size constants changed. |
 | `npm run test:lds` | The bank-conflict analysis: a strided LDS read reports a conflict, padding the stride removes it, the reported stride matches what each fixture strides by, and the kernel still computes the right answer either way. |
-| `npm run test:all` | All four of the above. Each compiles fixtures through the real toolchain and runs them in the real simulator, so they need `make -C toolchain llvm` and `make -C simulator wasm` first; each reports what is missing and skips rather than failing. `make website-test` calls it. |
+| `npm run test:all` | All five of the above. Each compiles fixtures through the real toolchain and runs them in the real simulator, so they need `make -C toolchain llvm` and `make -C simulator wasm` first; each reports what is missing and skips rather than failing. `make website-test` calls it. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run smoke` | `libcudart.ts` driven against `/tmp/sim-runner.wasm`, `/tmp/wasm_exec.js`, and the Vectoradd artifacts in `toolchain/build/smoke`. |
 | `npm run compile-smoke` | The compile pipeline end to end, printing each stage and both artifact sizes. |
-| `npm run class-audit` | Class names used with no rule, and rules with no user. |
 
 Build-time variables: `VITE_BASE_PATH` (site base path, for a GitHub Pages
 `/<repo>/` subpath), `VITE_DRIVER_ENCODING` (`br` or `raw`; Pages ignores
