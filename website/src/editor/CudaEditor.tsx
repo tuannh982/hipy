@@ -12,6 +12,7 @@ import "monaco-editor/editor/contrib/parameterHints/browser/parameterHints";
 import "monaco-editor/editor/contrib/contextmenu/browser/contextmenu";
 import "monaco-editor/editor/contrib/snippet/browser/snippetController2";
 import "monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching";
+import "monaco-editor/editor/contrib/comment/browser/comment";
 import "monaco-editor/editor/contrib/folding/browser/folding";
 import "monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
@@ -38,6 +39,7 @@ import {
   isCudaRuntimeUnimplemented,
   lintCuda,
 } from "../lib/cudaLanguage";
+import { cudaMonarch } from "../lib/cudaMonarch";
 
 const languageId = "cuda";
 let languageRegistered = false;
@@ -45,78 +47,34 @@ let languageRegistered = false;
 function registerCudaLanguage(): void {
   if (languageRegistered) return;
   monaco.languages.register({ id: languageId, extensions: [".cu", ".cuh"] });
-  monaco.languages.setMonarchTokensProvider(languageId, {
-    defaultToken: "",
-    // CUDA's qualifiers plus the C++ a .cu file is actually read with.
-    keywords: [
-      ...CUDA_KEYWORDS,
-      // C++ keywords, the subset a .cu file in this Playground can use.
-      "alignas", "alignof", "and", "asm", "auto", "bool", "break", "case", "catch",
-      "char", "class", "const", "constexpr", "const_cast", "continue", "decltype",
-      "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit",
-      "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline",
-      "int", "long", "mutable", "namespace", "new", "noexcept", "nullptr", "operator",
-      "private", "protected", "public", "register", "reinterpret_cast", "return",
-      "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct",
-      "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef",
-      "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile",
-      "wchar_t", "while",
-    ],
-    types: [...CUDA_TYPES],
-    builtins: [
-      // Runtime API listed apart from the intrinsics so completion can rank it.
-      ...CUDA_RUNTIME,
-      // Host libc names: ordinary host functions, so they take the identifier
-      // colour and appear in completion only.
-    ],
-    tokenizer: {
-      root: [
-        // Preprocessor first: a #define carries the constants every launch size
-        // comes from.
-        [/^\s*#\s*(?:define|include|pragma|ifndef|ifdef|endif|if|else|elif|undef|error|line)\b/,
-          "keyword.control"],
-        // Its own token class so the theme can tint execution space apart from C++.
-        [/@(?:global|device|host|shared|constant|managed|restrict|launch_bounds|forceinline|noinline|align)\b/, "keyword.cuda"],
-        [/(?:def|class|struct|namespace|template|typedef)\b/, { cases: { "@keywords": "keyword", "@default": "type.identifier" } }],
-        [/[a-zA-Z_]\w*/, {
-          cases: {
-            "@types": "type",
-            "@builtins": "support.function",
-            "@keywords": { cases: { "@types": "type", "@default": "keyword" } },
-            "@default": "identifier",
-          },
-        }],
-        { include: "@whitespace" },
-        [/[{}()[\]]/, "@brackets"],
-        [/[<>]/, "operators"],
-        [/[;,.]/, "delimiter"],
-        [/[=><!~?:&|+\-*/^%]+/, "operators"],
-        // One token per literal, so `0xFFu` and `1.5e-3f` do not split in three.
-        [/0[xX][0-9a-fA-F']+/, "number.hex"],
-        [/0[bB][01']+/, "number.hex"],
-        [/\d[\d']*/, "number"],
-        [/\d*\.\d+(?:[eE][+-]?\d+)?[fFuUlL]*/, "number.float"],
-        [/\.(?:\d+)(?:[eE][+-]?\d+)?[fFuUlL]*/, "number.float"],
-        [/\d+[eE][+-]?\d+[fFuUlL]*/, "number.float"],
-        // An unterminated literal, so it reads as wrong rather than colouring the
-        // rest of the file as a string.
-        [/"(?:[^"\\\n]|\\.)*$/, "string.invalid"],
-        [/u8"/, "string", "@string"],
-        [/"(?:[^"\\]|\\.)*"/, "string"],
-        [/"(?:[^"\\]|\\.)*/, "string", "@string"],
-        [/'(?:[^'\\\n]|\\.)*'/, "string"],
-        [/\/\/.*$/, "comment"],
-        [/\/\*/, "comment", "@comment"],
-      ],
-      comment: [
-        [/[^^%]+/, "operator"]],
-      whitespace: [
-        [/[ \t\r\n]+/, "white"],
-        [/\/\*/, "comment", "@comment"],
-        [/\/\/.*$/, "comment"],
-      ],
+  // Without these tokens the toggle-comment actions are registered but do nothing:
+  // they read the comment strings off the language configuration.
+  monaco.languages.setLanguageConfiguration(languageId, {
+    comments: {
+      lineComment: "//",
+      blockComment: ["/*", "*/"],
     },
+    brackets: [
+      ["{", "}"],
+      ["[", "]"],
+      ["(", ")"],
+    ],
+    autoClosingPairs: [
+      { open: "{", close: "}" },
+      { open: "[", close: "]" },
+      { open: "(", close: ")" },
+      { open: '"', close: '"', notIn: ["string"] },
+      { open: "'", close: "'", notIn: ["string"] },
+    ],
+    surroundingPairs: [
+      { open: "{", close: "}" },
+      { open: "[", close: "]" },
+      { open: "(", close: ")" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
   });
+  monaco.languages.setMonarchTokensProvider(languageId, cudaMonarch);
   registerCompletionItemProvider();
   registerHoverProvider();
   registerSignatureHelpProvider();
@@ -594,7 +552,7 @@ export function CudaEditor({ value, diagnostics, onChange, revealLine = null }: 
     });
     editorRef.current = editor;
 
-                editor.addAction({
+    editor.addAction({
       id: "hipy.findInCode",
       label: "Find in Code",
       contextMenuGroupId: "navigation",
@@ -602,6 +560,13 @@ export function CudaEditor({ value, diagnostics, onChange, revealLine = null }: 
       run: (target) => {
         target.getAction("actions.find")?.run();
       },
+    });
+
+    // Monaco binds line comment to Cmd/Ctrl+/ on its own once the comment
+    // contribution is loaded, but block comment to Shift+Alt+A, which is not what
+    // anyone expects from a code editor. Cmd/Ctrl+Shift+/ is the convention.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Slash, () => {
+      editor.getAction("editor.action.blockComment")?.run();
     });
 
     applyLint(editor);
