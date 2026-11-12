@@ -2,10 +2,24 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { accessSync, constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..", "..");
+// cargo installs wasm-tools into ~/.cargo/bin, which is not on PATH in every
+// shell, so look there too rather than failing the suite over a PATH entry.
+// The fallback name is resolved on PATH by spawnSync.
+function resolveWasmTools() {
+    const cargo = path.join(process.env.HOME ?? "", ".cargo", "bin", "wasm-tools");
+    try {
+        accessSync(cargo, constants.X_OK);
+        return cargo;
+    } catch {
+        return "wasm-tools";
+    }
+}
+const wasmTools = resolveWasmTools();
 // The shared boundary table, read for the one message this suite asserts below.
 const boundaries = JSON.parse(await readFile(path.join(root, "boundaries.json"), "utf8")).boundaries;
 const require = createRequire(import.meta.url);
@@ -303,8 +317,11 @@ int main(void) { return __CUDA_FP32_ONLY__ != 1 || launch == 0; }
             } else {
                 const hostWasm = path.join(output, `${srcStem}-host.wasm`);
                 await writeFile(hostWasm, await sandbox.fs.readFile(`/workspace/${srcStem}-host.wasm`));
-                const printed = spawnSync("wasm-tools", ["print", hostWasm], { encoding: "utf8" });
-                if (!check("host WASM can be inspected", printed.status === 0, printed.error?.message ?? `exit=${printed.status}`)) {
+                const printed = spawnSync(wasmTools, ["print", hostWasm], { encoding: "utf8" });
+                const inspectError = printed.error
+                    ? `${printed.error.message} (install it with 'cargo install wasm-tools --version 1.259.0 --locked')`
+                    : `exit=${printed.status}`;
+                if (!check("host WASM can be inspected", printed.status === 0, inspectError)) {
                     failures++;
                 } else {
                     const wat = printed.stdout;

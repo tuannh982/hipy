@@ -26,8 +26,8 @@ fi
 #  - libmman-polyfill.a: mprotect/posix_madvise/madvise no-ops (the
 #    wasix-sysroot headers declare them but libc.a does not implement them).
 #  - libsetjmp-polyfill.a: setjmp/longjmp no-ops (the sysroot's setjmp routes
-#    through the WASIX stack_checkpoint syscall, which requires binaryen
-#    asyncify exports the driver does not have; without this stub the driver
+#    through the WASIX stack_checkpoint syscall, which needs the asyncify
+#    exports the driver does not have; without this stub the driver
 #    dies with exit 45 as soon as cc1 runs. See setjmp-stubs.c for details).
 POLYFILL_DIR="$ROOT/toolchain/src/polyfill"
 STUBS="$ROOT/toolchain/artifacts/libmman-polyfill.a"

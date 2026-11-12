@@ -2,10 +2,20 @@
 # Strips debug (name) sections from llvm-driver.wasm to shrink it for
 # distribution. Produces toolchain/artifacts/llvm-driver-stripped.wasm.
 #
-# Tools, in order of preference:
-#   1. wasm-tools strip 1.259.0 (cargo install wasm-tools --version 1.259.0 --locked)
-#   2. wasm-opt --strip-debug 133 (brew install binaryen)
+# Tool: wasm-tools 1.259.0
+#   cargo install wasm-tools --version 1.259.0 --locked
 #
+# wasm-tools is required, not optional, and binaryen's wasm-opt is not a
+# substitute: wasm-opt rewrites the import section into the WASI
+# compact-imports encoding, which wasmer does not implement. A driver stripped
+# with wasm-opt fails to validate, and the playground reports "unable to spawn
+# the command: compile error: Validate(\"Unknown validation error\")" the first
+# time it tries to run clang. wasm-tools only removes custom sections, so the
+# import section keeps the encoding wasmer accepts.
+#
+# The stripped driver is verified before this script reports success: a driver
+# wasmer cannot spawn is worse than no driver, because the build would succeed
+# and the failure would surface in the browser instead.
 set -euo pipefail
 cd "$(dirname "$0")/../../../"
 ROOT="$(pwd)"
@@ -20,53 +30,19 @@ fi
 
 before=$(stat -f%z "$SRC" 2>/dev/null || stat -c%s "$SRC")
 WASM_TOOLS_VERSION=1.259.0
-WASM_OPT_VERSION=133
-tool=
-tool_version=
 
-if command -v wasm-tools >/dev/null 2>&1; then
-  if wasm_tools_version=$(wasm-tools --version 2>&1); then
-    if [[ "$wasm_tools_version" == *"$WASM_TOOLS_VERSION"* ]]; then
-      tool=wasm-tools
-      tool_version="$wasm_tools_version"
-    else
-      echo "strip-llvm.sh: wasm-tools found but version is '$wasm_tools_version'; expected $WASM_TOOLS_VERSION." >&2
-      exit 1
-    fi
-  else
-    echo "strip-llvm.sh: wasm-tools --version failed: $wasm_tools_version" >&2
-    exit 1
-  fi
-fi
+WASM_TOOLS="$("$ROOT/toolchain/src/scripts/check-wasm-tools.sh")"
+wasm_tools_version=$("$WASM_TOOLS" --version 2>&1)
 
-if [[ -z "$tool" ]] && command -v wasm-opt >/dev/null 2>&1; then
-  if wasm_opt_version=$(wasm-opt --version 2>&1); then
-    if [[ "$wasm_opt_version" == *"$WASM_OPT_VERSION"* ]]; then
-      tool=wasm-opt
-      tool_version="$wasm_opt_version"
-    else
-      echo "strip-llvm.sh: wasm-opt found but version is '$wasm_opt_version'; expected $WASM_OPT_VERSION." >&2
-      exit 1
-    fi
-  else
-    echo "strip-llvm.sh: wasm-opt --version failed: $wasm_opt_version" >&2
-    exit 1
-  fi
-fi
-
-if [[ -z "$tool" ]]; then
-  echo "strip-llvm.sh: neither pinned wasm-tools $WASM_TOOLS_VERSION nor wasm-opt $WASM_OPT_VERSION found." >&2
-  echo "Install with 'cargo install wasm-tools --version $WASM_TOOLS_VERSION --locked' or 'brew install binaryen'." >&2
-  exit 1
-fi
-
-echo "strip-llvm.sh: using $tool ($tool_version)"
-if [[ "$tool" == wasm-tools ]]; then
-  wasm-tools strip --all "$SRC" -o "$DST"
-else
-  wasm-opt --strip-debug --disable-compact-imports --all-features "$SRC" -o "$DST"
-fi
+echo "strip-llvm.sh: using wasm-tools ($wasm_tools_version)"
+"$WASM_TOOLS" strip --all "$SRC" -o "$DST"
 
 after=$(stat -f%z "$DST" 2>/dev/null || stat -c%s "$DST")
 echo "strip-llvm.sh: $before -> $after bytes ($(( before / 1024 / 1024 ))MB -> $(( after / 1024 / 1024 ))MB)"
+
+# A driver wasmer cannot spawn is worse than no driver: the build succeeds and
+# the failure surfaces in the browser as a compile error. So the artifact is
+# checked here, where it is produced, rather than by whoever runs the site.
+"$ROOT/toolchain/src/scripts/verify-driver.mjs" "$DST"
+
 echo "strip-llvm.sh: OK $DST"

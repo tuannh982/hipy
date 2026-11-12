@@ -16,9 +16,13 @@ cycle-accurate AMD GPU simulator.
 Run from the repository root. Needs GNU Make, `bash`, `tar`, Go 1.27.0, and
 Node.js `^20.19.0 || >=22.12.0`.
 
+The toolchain also needs `wasm-tools` 1.259.0, which strips the LLVM driver:
+`cargo install wasm-tools --version 1.259.0 --locked`. See
+`toolchain/README.md`.
+
 | Command | Output |
 | --- | --- |
-| `make deps` | Pinned `simulator/third_party/` checkouts, `node_modules`, the LLVM driver (30–90 min). Idempotent. `SKIP_LLVM=1` reuses an existing driver. Needs SSH access to `github.com:sarchlab`. |
+| `make deps` | Pinned `simulator/third_party/` checkouts, `node_modules`, the LLVM driver (30–90 min). Idempotent. `SKIP_LLVM=1` reuses an existing driver. |
 | `make build` | `website/public/sim-runner.wasm`, `wasm_exec.js`, the staged driver and toolchain archive, `website/dist`. Requires `make deps`. |
 | `make test` | Toolchain, Go, and website suites. |
 | `make smoke` | Compiled Vectoradd artifacts, a run through the wasm exports, and the one-kernel end-to-end test. |

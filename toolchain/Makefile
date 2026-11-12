@@ -58,8 +58,9 @@ help: ## Show this help
 
 # --- dependencies ------------------------------------------------------------
 
-deps: ## Install the pinned @wasmer/sdk runner
+deps: ## Install the pinned @wasmer/sdk runner, check the pinned wasm-tools
 	npm ci --prefix runner
+	@$(SCRIPTS)/check-wasm-tools.sh >/dev/null
 
 # --- build (see README.md) ---------------------------------------------------
 

@@ -1,0 +1,14 @@
+{
+  "name": "hipy-remotion",
+  "version": "1.0.0",
+  "scripts": {
+    "render": "remotion render",
+    "render:all": "node scripts/render-all.mjs"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "remotion": "^4.0.0",
+    "@remotion/cli": "^4.0.0"
+  }
+}

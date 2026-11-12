@@ -18,7 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { compileAndRun, fixturesDir, missingPrerequisites } from "./lib/harness.mjs";
+import { compileAndRun, fixturesDir, missingPrerequisites, repoRoot } from "./lib/harness.mjs";
 
 const missing = missingPrerequisites();
 const skip = missing.length > 0 ? `missing: ${missing.join(", ")}` : false;
@@ -104,4 +104,38 @@ test("an LDS kernel still computes the right answer", { skip }, async () => {
     }
     assert.deepEqual(result.values, expected, `${id} computed the wrong tile sums`);
   }
+});
+
+// The bank-conflict lesson runs the lesson's own files rather than a fixture, so the
+// numbers its prose quotes -- a 32-way conflict, then none -- are pinned by the suite
+// rather than asserted by the lesson. A lesson whose starter no longer conflicts would
+// teach a task that cannot be observed, and a solution that still conflicts would
+// teach a lie.
+const lessonDir = path.join(
+  repoRoot,
+  "website",
+  "src",
+  "lessons",
+  "gpgpu-101",
+  "1-2-thinking-in-parallel",
+  "6-bank-conflict",
+);
+
+/** The degree of the lesson's shared-memory read: the access that reads a column. */
+function lessonReadDegree(result) {
+  const reads = patternsOf(result).filter((pattern) => pattern.isRead);
+  assert.ok(reads.length > 0, "the lesson kernel reported no LDS read");
+  return reads.reduce((a, b) => (b.degree > a.degree ? b : a)).degree;
+}
+
+test("the bank-conflict lesson's starter conflicts and its padded solution does not", { skip }, async () => {
+  const conflicted = await compileAndRun(path.join(lessonDir, "starter.cu"), { wantLds: true });
+  const padded = await compileAndRun(path.join(lessonDir, "solution.cu"), { wantLds: true });
+  assert.equal(conflicted.bridgeError, null, `bridge error: ${conflicted.bridgeError}`);
+  assert.equal(padded.bridgeError, null, `bridge error: ${padded.bridgeError}`);
+  assert.equal(lessonReadDegree(conflicted), 32, "the lesson's starter should hit a 32-way conflict");
+  assert.equal(lessonReadDegree(padded), 1, "the padded tile should be conflict-free");
+  // The lesson claims the padding changes nothing but the speed. The printed result
+  // is the observable half of that claim.
+  assert.equal(conflicted.stdout, padded.stdout, "padding changed the transpose's result");
 });

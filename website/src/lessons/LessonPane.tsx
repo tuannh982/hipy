@@ -7,6 +7,9 @@ export function LessonPane({ lesson, taskCount }: { lesson: Lesson; taskCount: n
       <span className="eyebrow">Task {lesson.number} of {taskCount}</span>
       <h2 className="lesson-title">{lesson.title}</h2>
       <MarkdownPane source={lesson.body} assets={lesson.assets} />
+      {lesson.video && (
+        <video controls width="100%" src={lesson.video} style={{ marginTop: 12 }} />
+      )}
             <div className="goal-callout">
         <span className="eyebrow">Goal</span>
         <p>{lesson.goal}</p>
