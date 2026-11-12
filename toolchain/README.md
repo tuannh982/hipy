@@ -28,12 +28,35 @@ for the shell, `website/src/lib/toolchains.ts` for the browser.
 Run from the repository root, or `make -C toolchain <target>`. LLVM and wasi-sdk
 are fetched rather than vendored, at the versions in `pins/`.
 
+### Prerequisites
+
+| Tool | Version | Why |
+| --- | --- | --- |
+| `wasm-tools` | 1.259.0 | Strips the driver (`make strip`). Required, not optional. |
+
+```
+cargo install wasm-tools --version 1.259.0 --locked
+```
+
+`cargo` installs into `~/.cargo/bin`, which is not on `PATH` in every shell.
+`strip-llvm.sh` looks there as well, so the build works either way; add it to
+`PATH` if you want to call `wasm-tools` yourself.
+
+`wasm-tools` is required because it is the only stripper that leaves the
+driver's import section alone. binaryen's `wasm-opt` rewrites that section into
+the WASI compact-imports encoding, which wasmer does not implement, so a
+driver stripped with it fails to validate: the playground reports `Compile
+error: ... unable to spawn the command: compile error: Validate("Unknown
+validation error")` the first time it tries to run clang. `make strip`
+verifies that the driver it produced can actually be spawned, so a stripped
+driver that wasmer would reject fails the build instead of the browser.
+
 | Command | Output |
 | --- | --- |
-| `make -C toolchain deps` | Fetches wasi-sdk and the pinned toolchain inputs. |
+| `make -C toolchain deps` | Installs the pinned runner and checks the pinned `wasm-tools`. |
 | `make -C toolchain host-tools` | Builds the host tools. |
 | `make -C toolchain llvm` | Cross-builds the driver. 30–90 min. |
-| `make -C toolchain strip` | Strips it to `llvm-driver-stripped.wasm`. |
+| `make -C toolchain strip` | Strips it to `llvm-driver-stripped.wasm`. Needs `wasm-tools`. |
 | `make -C toolchain test` | The three suites below. |
 | `make -C toolchain compile SRC=… OUT=…` | One `.cu` to the three artifacts. `OUT` is a directory. `TOOLCHAIN=`, `DEVICE=` and `ARCH=` choose the target; all three default out of `toolchains.json`. |
 | `make -C toolchain fixture FIXTURE=…` | Compiles one `testdata/fixtures.json` entry. Needs Docker. |
