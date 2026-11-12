@@ -1,17 +1,18 @@
 #include <cuda_runtime.h>
-// Shared memory is split into banks. If two threads in a warp hit the same
+#define TILE 32
+// Shared memory is split into banks. If two threads of a wavefront hit the same
 // bank, accesses serialize (bank conflict). Padding the array by one avoids it.
 __global__ void transpose(float *out, const float *in, int w) {
-  __shared__ float tile[16][16]; // TODO: add +1 padding to avoid bank conflict
+  __shared__ float tile[TILE][TILE]; // TODO: add +1 padding to avoid bank conflict
   int x = threadIdx.x, y = threadIdx.y;
   tile[y][x] = in[y * w + x];
   __syncthreads();
-  out[x * w + y] = tile[y][x];
+  out[y * w + x] = tile[x][y];
 }
 
 int main(void) {
-  const int W = 4, H = 4, N = 16;
-  static float in[16], host[16];
+  const int W = TILE, H = TILE, N = TILE * TILE;
+  static float in[N], host[N];
   for (int i = 0; i < N; ++i) {
     in[i] = (float)i;
   }
@@ -24,11 +25,10 @@ int main(void) {
   cudaGetLastError();
   cudaDeviceSynchronize();
   cudaMemcpy(host, dOut, N * sizeof(float), cudaMemcpyDeviceToHost);
-  for (int i = 0; i < H; ++i) {
+  for (int i = 0; i < 4; ++i) { // the first four rows of the result
     for (int j = 0; j < W; ++j) {
-      printf("%4.0f ", host[i * W + j]);
+      printf("out[%3d]=%4.0f\n", i * W + j, host[i * W + j]);
     }
-    printf("\n");
   }
   cudaFree(dIn);
   cudaFree(dOut);

@@ -1,37 +1,38 @@
 import { Composition } from "remotion";
 import { BankViz } from "./BankViz";
 
-const conflictAccesses = [
-  { t: 0, bank: 0, text: "Thread 0 accesses tile[0][0], bank 0" },
-  { t: 1, bank: 16, text: "Thread 1 accesses tile[1][0], bank 16" },
-  { t: 2, bank: 0, text: "Thread 2 accesses tile[2][0], bank 0" },
-  { t: 3, bank: 16, text: "Thread 3 accesses tile[3][0], bank 16" },
-  { t: 4, bank: 0, text: "Thread 4 accesses tile[4][0], bank 0" },
-  { t: 5, bank: 16, text: "Thread 5 accesses tile[5][0], bank 16" },
-  { t: 6, bank: 0, text: "Thread 6 accesses tile[6][0], bank 0" },
-  { t: 7, bank: 16, text: "Thread 7 accesses tile[7][0], bank 16" },
-];
+// The bank formula is stated once per frame, not once per thread: WORD_SIZE = 4 bytes
+// per bank word, N_BANKS = 32 banks, so bank = (byte address / 4) mod 32.
+const FORMULA = "Bank = (byte address / WORD_SIZE) mod N_BANKS,  WORD_SIZE = 4,  N_BANKS = 32";
 
-const noConflictAccesses = [
-  { t: 0, bank: 0, text: "Thread 0 accesses tile[0][0], bank (0*17+0)%32 = 0" },
-  { t: 1, bank: 17, text: "Thread 1 accesses tile[1][0], bank (1*17+0)%32 = 17" },
-  { t: 2, bank: 2, text: "Thread 2 accesses tile[2][0], bank (2*17+0)%32 = 2" },
-  { t: 3, bank: 19, text: "Thread 3 accesses tile[3][0], bank (3*17+0)%32 = 19" },
-  { t: 4, bank: 4, text: "Thread 4 accesses tile[4][0], bank (4*17+0)%32 = 4" },
-  { t: 5, bank: 21, text: "Thread 5 accesses tile[5][0], bank (5*17+0)%32 = 21" },
-  { t: 6, bank: 6, text: "Thread 6 accesses tile[6][0], bank (6*17+0)%32 = 6" },
-  { t: 7, bank: 23, text: "Thread 7 accesses tile[7][0], bank (7*17+0)%32 = 23" },
-];
+// A 32-wide tile: reading down a column steps 32 floats = 128 bytes = one whole
+// bank row, so every lane of the phase wants the same bank.
+const conflictAccesses = Array.from({ length: 8 }).map((_, r) => ({
+  t: r,
+  bank: 0,
+  text: `Thread ${r}: tile[${r}][0] @byte ${r * 128} → bank 0`,
+}));
 
-const sameAddressAccesses = Array.from({ length: 8 }).map((_, i) => ({ t: i, bank: 0, text: `Thread ${i} accesses tile[0][0], bank 0 (same address)` }));
+// One extra float per row: row r now starts at word 33 * r, and 33 * r mod 32 = r.
+const noConflictAccesses = Array.from({ length: 8 }).map((_, r) => ({
+  t: r,
+  bank: r,
+  text: `Thread ${r}: tile[${r}][0] @byte ${r * 132} → bank ${r}`,
+}));
+
+const sameAddressAccesses = Array.from({ length: 8 }).map((_, i) => ({
+  t: i,
+  bank: 0,
+  text: `Thread ${i}: tile[0][0] @byte 0 → bank 0`,
+}));
 
 export const RemotionRoot = () => (
   <>
     <Composition id="BankConflict" component={BankViz} durationInFrames={120} fps={30} width={640} height={360}
-      defaultProps={{ title: "Bank Conflict", dataShape: "float tile[16][16], address = row*16 + col", code: "out[x*w+y] = tile[y][x]", accesses: conflictAccesses, banks: [0, 16], conflictBanks: [0, 16] }} />
+      defaultProps={{ title: "Bank Conflict", dataShape: "float tile[32][32], address = row*32 + col", code: "out[y*w+x] = tile[x][y]", formula: FORMULA, accesses: conflictAccesses, banks: [0], conflictBanks: [0] }} />
     <Composition id="BankNoConflict" component={BankViz} durationInFrames={120} fps={30} width={640} height={360}
-      defaultProps={{ title: "No Bank Conflict", dataShape: "float tile[16][17] (padded), address = row*17 + col", code: "out[x*w+y] = tile[y][x]", accesses: noConflictAccesses, banks: [0, 17, 2, 19, 4, 21, 6, 23], conflictBanks: [] }} />
+      defaultProps={{ title: "No Bank Conflict", dataShape: "float tile[32][33] (padded), address = row*33 + col", code: "out[y*w+x] = tile[x][y]", formula: FORMULA, accesses: noConflictAccesses, banks: [0, 1, 2, 3, 4, 5, 6, 7], conflictBanks: [] }} />
     <Composition id="BankSameAddress" component={BankViz} durationInFrames={120} fps={30} width={640} height={360}
-      defaultProps={{ title: "Same Address (no conflict)", dataShape: "float tile[16][16], all read tile[0][0]", code: "x = tile[0][0];", accesses: sameAddressAccesses, banks: [0], conflictBanks: [] }} />
+      defaultProps={{ title: "Same Address (no conflict)", dataShape: "float tile[32][32], all read tile[0][0]", code: "x = tile[0][0];", formula: FORMULA, accesses: sameAddressAccesses, banks: [0], conflictBanks: [] }} />
   </>
 );

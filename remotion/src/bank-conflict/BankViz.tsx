@@ -7,6 +7,7 @@ export const BankViz = ({
   title,
   dataShape,
   code,
+  formula,
   accesses,
   banks,
   conflictBanks,
@@ -14,6 +15,7 @@ export const BankViz = ({
   title: string;
   dataShape: string;
   code: string;
+  formula?: string;
   accesses: Access[];
   banks: number[];
   conflictBanks: number[];
@@ -24,11 +26,16 @@ export const BankViz = ({
     <div style={{ width: 640, height: 360, background: "#111", color: "#fff", fontFamily: "monospace", padding: 20 }}>
       <div style={{ fontSize: 16, marginBottom: 4 }}>{title}</div>
       <div style={{ fontSize: 11, marginBottom: 2 }}>Data: {dataShape}</div>
-      <div style={{ fontSize: 11, marginBottom: 8 }}>Code: {code}</div>
+      <div style={{ fontSize: 11, marginBottom: 2 }}>Code: {code}</div>
+      {formula ? (
+        <div style={{ fontSize: 11, marginBottom: 8, color: "#8ab4f8" }}>{formula}</div>
+      ) : (
+        <div style={{ marginBottom: 8 }} />
+      )}
       <div style={{ display: "flex", gap: 20 }}>
         <div style={{ flex: 1 }}>
           {accesses.map((a, i) => (
-            <div key={i} style={{ fontSize: 11, marginBottom: 2, color: i <= step ? "#fff" : "#555" }}>{a.text}</div>
+            <div key={i} style={{ fontSize: 10, marginBottom: 2, color: i <= step ? "#fff" : "#555" }}>{a.text}</div>
           ))}
         </div>
         <div style={{ flex: 1 }}>
