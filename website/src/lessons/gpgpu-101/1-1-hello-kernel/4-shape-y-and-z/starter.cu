@@ -27,8 +27,9 @@ int main(void) {
 
   cudaMemcpy(host, deviceOut, N * sizeof(float), cudaMemcpyDeviceToHost);
   for (int y = 0; y < H; ++y) {
-    for (int x = 0; x < W; ++x)
+    for (int x = 0; x < W; ++x) {
       printf("%4.0f ", host[y * W + x]);
+    }
     printf("\n");
   }
 

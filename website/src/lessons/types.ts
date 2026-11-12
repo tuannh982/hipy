@@ -6,6 +6,7 @@ export type Lesson = {
     body: string;
     starter: string;
     assets: Record<string, string>;
+    video?: string;
 };
 
 export type Module = {

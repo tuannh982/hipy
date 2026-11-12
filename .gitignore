@@ -12,3 +12,5 @@ website/public/sim-runner.wasm.br
 website/dist/
 toolchain/build/
 .wrangler
+remotion/node_modules/
+remotion/out/

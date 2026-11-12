@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { Components } from "react-markdown";
@@ -17,7 +18,7 @@ export function MarkdownPane({
 
   return (
     <div className="lesson-prose">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={overrides}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeRaw, rehypeKatex]} components={overrides}>
         {source}
       </ReactMarkdown>
     </div>
@@ -38,6 +39,10 @@ export function makeOverrides(assets: Record<string, string>): Components {
         return <span className="lesson-image-missing">{src ?? "image"}</span>;
       }
       return <img className="lesson-image" src={resolved} alt={alt ?? ""} />;
+    },
+                        video({ src, ...rest }) {
+      const resolved = src !== undefined && Object.hasOwn(assets, src) ? assets[src] : src;
+      return <video className="lesson-video" src={resolved} controls {...rest} />;
     },
                         a({ href, title, children }) {
       const external = href !== undefined && /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href);

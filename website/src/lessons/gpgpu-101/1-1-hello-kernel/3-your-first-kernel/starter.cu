@@ -27,8 +27,9 @@ int main(void) {
   cudaDeviceSynchronize();
 
   cudaMemcpy(host, deviceOut, N * sizeof(float), cudaMemcpyDeviceToHost);
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     printf("out[%2d] = %.1f\n", i, host[i]);
+  }
 
   cudaFree(deviceOut);
   return 0;

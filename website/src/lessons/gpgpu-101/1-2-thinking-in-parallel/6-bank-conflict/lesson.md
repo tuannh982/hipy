@@ -8,6 +8,24 @@ Why does a transpose cause a conflict? In a 16x16 tile stored row-major, thread 
 
 Padding fixes it: declare `tile[16][17]` instead of `tile[16][16]`. The extra column shifts every row by one bank, so column reads no longer collide. The result is identical; only the speed changes.
 
+## Three scenarios
+
+Scenario A (conflict): `tile[16][16]`, threads read down a column. Addresses are 16 apart, landing in the same bank, so accesses serialize.
+
+<video controls width="100%" src="bank-conflict.mp4"></video>
+
+Scenario B (no conflict): `tile[16][17]`, the extra column shifts each row by one bank, so column reads hit different banks and run in parallel.
+
+<video controls width="100%" src="bank-no-conflict.mp4"></video>
+
+Scenario C (same address): all threads read `tile[0][0]`; same address is broadcast, no conflict.
+
+<video controls width="100%" src="bank-same-address.mp4"></video>
+
+## Detailed bank conflict explanation
+
+In a warp of 32 threads, if two threads access addresses that map to the same bank, the accesses serialize (bank conflict), even if they are in different "waves". For example, thread 0 reading data[0] and thread 2 reading data[32] both hit bank 0, so the scheduler must serialize them. Padding shifts addresses so threads hit different banks and run in parallel.
+
 ## Task
 The starter uses `tile[16][16]` without padding, so column reads collide. You must add `+1` padding to `tile[16][17]` to remove the conflict.
 

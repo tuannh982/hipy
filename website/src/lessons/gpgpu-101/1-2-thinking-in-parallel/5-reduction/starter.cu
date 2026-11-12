@@ -5,18 +5,23 @@ __global__ void reduce(float *out, const float *in, int n) {
   s[i] = (i < n) ? in[i] : 0.0f;
   __syncthreads();
   for (int stride = 8; stride > 0; stride >>= 1) {
-    if (i < stride)
+    if (i < stride) {
       s[i] += s[i + stride];
+    }
     // TODO: synchronize here.
   }
-  if (i == 0)
+  if (i == 0) {
     out[0] = s[0];
+  }
 }
+
 int main(void) {
   const int N = 16;
   static float in[16], host[1];
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     in[i] = (float)(i + 1);
+  }
+
   float *dIn, *dOut;
   cudaMalloc(&dIn, N * sizeof(float));
   cudaMalloc(&dOut, sizeof(float));
